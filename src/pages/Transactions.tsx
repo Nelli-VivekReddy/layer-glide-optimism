@@ -6,11 +6,14 @@ import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { getLayer2Balance } from "@/lib/ethers";
 import { toast } from "@/components/ui/use-toast";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Loader2 } from "lucide-react";
 
 export default function Transactions() {
   const [searchAddress, setSearchAddress] = useState("");
   const [balance, setBalance] = useState("0");
   const [isSearching, setIsSearching] = useState(false);
+  const [activeTab, setActiveTab] = useState("transactions");
 
   const handleSearch = async () => {
     if (!searchAddress) {
@@ -65,7 +68,14 @@ export default function Transactions() {
               className="bg-purple-500 hover:bg-purple-600"
               disabled={isSearching}
             >
-              {isSearching ? "Searching..." : "Search"}
+              {isSearching ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Searching...
+                </>
+              ) : (
+                "Search"
+              )}
             </Button>
           </div>
           {searchAddress && (
@@ -78,7 +88,25 @@ export default function Transactions() {
           )}
         </CardContent>
       </Card>
-      <TransactionTracker mode="user" address={searchAddress} />
+
+      {searchAddress && (
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+          <TabsList className="grid w-full grid-cols-2 mb-4">
+            <TabsTrigger value="transactions" className="data-[state=active]:bg-purple-500/20">
+              Transaction History
+            </TabsTrigger>
+            <TabsTrigger value="network" className="data-[state=active]:bg-purple-500/20">
+              Network Transactions
+            </TabsTrigger>
+          </TabsList>
+          <TabsContent value="transactions">
+            <TransactionTracker mode="user" address={searchAddress} />
+          </TabsContent>
+          <TabsContent value="network">
+            <TransactionTracker mode="network" />
+          </TabsContent>
+        </Tabs>
+      )}
     </div>
   );
 }

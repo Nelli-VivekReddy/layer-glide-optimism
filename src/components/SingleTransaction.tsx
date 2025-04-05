@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/use-toast";
 import { executeL2Transaction } from "@/lib/ethers";
 import { Loader2, Send } from "lucide-react";
+import { useWallet } from "@/hooks/useWallet";
 
 interface SingleTransactionProps {
     onSuccess?: (transaction: any) => void;
@@ -15,6 +16,7 @@ export function SingleTransaction({ onSuccess }: SingleTransactionProps) {
     const [amount, setAmount] = useState("");
     const [isLoading, setIsLoading] = useState(false);
     const { toast } = useToast();
+    const { address } = useWallet();
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -27,15 +29,25 @@ export function SingleTransaction({ onSuccess }: SingleTransactionProps) {
             return;
         }
 
+        if (!address) {
+            toast({
+                title: "Error",
+                description: "Please connect your wallet first",
+                variant: "destructive",
+            });
+            return;
+        }
+
         setIsLoading(true);
         try {
             const tx = await executeL2Transaction(to, amount);
             const transaction = {
-                from: tx.from,
-                to: tx.to,
-                value: tx.value,
+                hash: tx.hash,
+                from: address,
+                to: to,
+                value: amount,
                 status: "pending",
-                timestamp: Math.floor(Date.now() / 1000),
+                createdAt: Math.floor(Date.now() / 1000),
             };
 
             if (onSuccess) {

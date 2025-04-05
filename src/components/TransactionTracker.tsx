@@ -102,7 +102,7 @@ export function TransactionTracker({ mode, address }: TransactionTrackerProps) {
   };
 
   const formatTimestamp = (timestamp: number) => {
-    return new Date(timestamp * 1000).toLocaleString();
+    return formatDistanceToNow(new Date(timestamp * 1000), { addSuffix: true });
   };
 
   const getTransactionType = (type: string) => {
@@ -197,7 +197,7 @@ export function TransactionTracker({ mode, address }: TransactionTrackerProps) {
             <Table>
               <TableHeader>
                 <TableRow className="border-white/10 hover:bg-white/5">
-                  <TableHead className="text-white/70">Hash</TableHead>
+                  <TableHead className="text-white/70">Type</TableHead>
                   <TableHead className="text-white/70">From</TableHead>
                   <TableHead className="text-white/70">To</TableHead>
                   <TableHead className="text-white/70">Amount</TableHead>
@@ -209,8 +209,8 @@ export function TransactionTracker({ mode, address }: TransactionTrackerProps) {
               <TableBody>
                 {transactions.map((tx) => (
                   <TableRow key={tx.hash} className="border-white/10 hover:bg-white/5">
-                    <TableCell className="font-mono text-white/80">
-                      {formatAddress(tx.hash)}
+                    <TableCell className="text-white/80">
+                      {getTransactionType(tx.type || 'transfer')}
                     </TableCell>
                     <TableCell className="font-mono text-white/80">
                       {formatAddress(tx.from)}
