@@ -6,7 +6,11 @@ import { useWallet } from "@/hooks/useWallet";
 import { executeL2Transaction, getLayer2Balance } from "@/lib/ethers";
 import { toast } from "@/components/ui/use-toast";
 
-export default function SingleTransaction() {
+interface SingleTransactionProps {
+    onSuccess?: (transaction: any) => void;
+}
+
+export default function SingleTransaction({ onSuccess }: SingleTransactionProps) {
     const { address, isConnected } = useWallet();
     const [recipient, setRecipient] = useState("");
     const [amount, setAmount] = useState("");
@@ -24,11 +28,25 @@ export default function SingleTransaction() {
 
         setIsLoading(true);
         try {
-            await executeL2Transaction(recipient, amount);
+            const tx = await executeL2Transaction(recipient, amount);
             toast({
                 title: "Transaction Submitted",
                 description: "Your Layer 2 transfer has been submitted successfully",
             });
+
+            // Create transaction object for the callback
+            const transaction = {
+                from: address,
+                to: recipient,
+                value: amount,
+                status: 'pending',
+                timestamp: Math.floor(Date.now() / 1000)
+            };
+
+            // Call onSuccess with the transaction data
+            if (onSuccess) {
+                onSuccess(transaction);
+            }
 
             setRecipient("");
             setAmount("");

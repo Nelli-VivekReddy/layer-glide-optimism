@@ -5,19 +5,37 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { getLayer2Balance } from "@/lib/ethers";
+import { toast } from "@/components/ui/use-toast";
 
 export default function Transactions() {
   const [searchAddress, setSearchAddress] = useState("");
   const [balance, setBalance] = useState("0");
+  const [isSearching, setIsSearching] = useState(false);
 
   const handleSearch = async () => {
-    if (!searchAddress) return;
+    if (!searchAddress) {
+      toast({
+        title: "Invalid Input",
+        description: "Please enter a wallet address",
+        variant: "destructive",
+      });
+      return;
+    }
 
+    setIsSearching(true);
     try {
+      // Fetch Layer 2 balance
       const l2Balance = await getLayer2Balance(searchAddress);
       setBalance(l2Balance);
     } catch (error) {
       console.error("Error fetching balance:", error);
+      toast({
+        title: "Error",
+        description: "Failed to fetch balance",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSearching(false);
     }
   };
 
@@ -40,12 +58,14 @@ export default function Transactions() {
               value={searchAddress}
               onChange={(e) => setSearchAddress(e.target.value)}
               className="bg-white/5 border-white/10 text-white flex-1"
+              disabled={isSearching}
             />
             <Button
               onClick={handleSearch}
               className="bg-purple-500 hover:bg-purple-600"
+              disabled={isSearching}
             >
-              Search
+              {isSearching ? "Searching..." : "Search"}
             </Button>
           </div>
           {searchAddress && (
@@ -58,7 +78,7 @@ export default function Transactions() {
           )}
         </CardContent>
       </Card>
-      <TransactionTracker mode="network" address={searchAddress} />
+      <TransactionTracker mode="user" address={searchAddress} />
     </div>
   );
 }

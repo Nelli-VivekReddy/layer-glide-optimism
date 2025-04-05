@@ -12,7 +12,7 @@ import { Link } from 'react-router-dom';
 
 // Helper function to format addresses
 const formatAddress = (address: string) => {
-  return `${address.substring(0, 6)}...${address.substring(address.length - 4)}`;
+  return `${address.slice(0, 6)}...${address.slice(-4)}`;
 };
 
 // Define the Transaction interface
@@ -29,75 +29,59 @@ interface Transaction {
 }
 
 interface TransactionTrackerProps {
-  mode?: 'user' | 'network';
+  mode: "user" | "network";
   address?: string;
 }
 
-export function TransactionTracker({ mode = 'user', address }: TransactionTrackerProps) {
-  const { isConnected } = useWallet();
+export function TransactionTracker({ mode, address }: TransactionTrackerProps) {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const { address: connectedAddress } = useWallet();
   const { toast } = useToast();
 
-  const fetchUserTransactions = async (address: string) => {
-    try {
-      setLoading(true);
-      const response = await fetch(`http://localhost:5500/api/transactions/user/${address}`);
-      if (!response.ok) {
-        throw new Error('Failed to fetch user transactions');
-      }
-      const data = await response.json();
-      setTransactions(data);
-    } catch (error) {
-      console.error("Error fetching user transactions:", error);
-      setError('Failed to fetch user transactions');
-      toast({
-        title: "Error",
-        description: "Failed to fetch user transaction history",
-        variant: "destructive",
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchNetworkData = async () => {
-    try {
-      setLoading(true);
-
-      // Fetch all network transactions using the correct endpoint
-      const response = await fetch('http://localhost:5500/api/transactions/network');
-      if (!response.ok) {
-        throw new Error('Failed to fetch network transactions');
-      }
-      const data = await response.json();
-      setTransactions(data);
-    } catch (error) {
-      console.error("Error fetching network data:", error);
-      setError('Failed to fetch network data');
-      toast({
-        title: "Error",
-        description: "Failed to fetch network transaction history",
-        variant: "destructive",
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
-    if (mode === 'user' && isConnected && address) {
-      fetchUserTransactions(address);
-    } else if (mode === 'network') {
-      fetchNetworkData();
+    const fetchTransactions = async () => {
+      try {
+        setIsLoading(true);
+        const targetAddress = mode === "user" ? (address || connectedAddress) : undefined;
 
-      // Set up polling to refresh data every 30 seconds
-      const intervalId = setInterval(fetchNetworkData, 30000);
+        if (!targetAddress && mode === "user") {
+          console.error("No address provided for user mode");
+          return;
+        }
 
-      return () => clearInterval(intervalId);
-    }
-  }, [isConnected, address, mode]);
+        const url = mode === "user"
+          ? `http://localhost:5500/api/transactions/user/${targetAddress}`
+          : "http://localhost:5500/api/transactions/network";
+
+        console.log(`Fetching transactions from: ${url}`);
+
+        const response = await fetch(url);
+        if (!response.ok) {
+          throw new Error(`Failed to fetch transactions: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        console.log(`Fetched ${data.length} transactions:`, data);
+
+        setTransactions(data);
+      } catch (error) {
+        console.error("Error fetching transactions:", error);
+        toast({
+          title: "Error",
+          description: "Failed to fetch transaction history",
+          variant: "destructive",
+        });
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchTransactions();
+    // Set up polling for live updates
+    const interval = setInterval(fetchTransactions, 5000);
+    return () => clearInterval(interval);
+  }, [mode, address, connectedAddress]);
 
   const getStatusBadge = (status: string) => {
     switch (status.toLowerCase()) {
@@ -116,7 +100,7 @@ export function TransactionTracker({ mode = 'user', address }: TransactionTracke
   };
 
   const formatTimestamp = (timestamp: number) => {
-    return formatDistanceToNow(new Date(timestamp), { addSuffix: true });
+    return new Date(timestamp * 1000).toLocaleString();
   };
 
   const getTransactionType = (type: string) => {
@@ -131,18 +115,25 @@ export function TransactionTracker({ mode = 'user', address }: TransactionTracke
     }
   };
 
-  if (loading) {
+  const getStatusColor = (status: string) => {
+    switch (status.toLowerCase()) {
+      case "pending":
+        return "text-yellow-500";
+      case "verified":
+        return "text-green-500";
+      case "finalized":
+        return "text-blue-500";
+      case "rejected":
+        return "text-red-500";
+      default:
+        return "text-gray-500";
+    }
+  };
+
+  if (isLoading) {
     return (
       <div className="flex items-center justify-center p-8">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="p-4 text-red-500">
-        <p>{error}</p>
       </div>
     );
   }
@@ -156,41 +147,52 @@ export function TransactionTracker({ mode = 'user', address }: TransactionTracke
   }
 
   return (
-    <div className="space-y-4">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Type</TableHead>
-            <TableHead>From</TableHead>
-            <TableHead>To</TableHead>
-            <TableHead>Value</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead>Time</TableHead>
-            <TableHead>Batch</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {transactions.map((tx) => (
-            <TableRow key={tx.hash}>
-              <TableCell>{getTransactionType(tx.type || 'transfer')}</TableCell>
-              <TableCell className="font-mono">{formatAddress(tx.from)}</TableCell>
-              <TableCell className="font-mono">{formatAddress(tx.to)}</TableCell>
-              <TableCell>{formatEther(tx.value)} ETH</TableCell>
-              <TableCell>{getStatusBadge(tx.status)}</TableCell>
-              <TableCell>{formatTimestamp(tx.createdAt)}</TableCell>
-              <TableCell>
-                {tx.batchId ? (
-                  <Link to={`/batches/${tx.batchId}`} className="text-blue-500 hover:underline">
-                    {tx.batchId}
-                  </Link>
-                ) : (
-                  'Not in batch'
-                )}
-              </TableCell>
+    <Card>
+      <CardHeader>
+        <CardTitle>
+          {mode === "user" ? "Your Transactions" : "Network Transactions"}
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Hash</TableHead>
+              <TableHead>From</TableHead>
+              <TableHead>To</TableHead>
+              <TableHead>Amount</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Time</TableHead>
+              {mode === "network" && <TableHead>Batch ID</TableHead>}
             </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </div>
+          </TableHeader>
+          <TableBody>
+            {transactions.map((tx) => (
+              <TableRow key={tx.hash}>
+                <TableCell className="font-mono">
+                  {formatAddress(tx.hash)}
+                </TableCell>
+                <TableCell className="font-mono">
+                  {formatAddress(tx.from)}
+                </TableCell>
+                <TableCell className="font-mono">
+                  {formatAddress(tx.to)}
+                </TableCell>
+                <TableCell>{formatEther(tx.value)} ETH</TableCell>
+                <TableCell className={getStatusColor(tx.status)}>
+                  {tx.status}
+                </TableCell>
+                <TableCell>{formatTimestamp(tx.createdAt)}</TableCell>
+                {mode === "network" && (
+                  <TableCell className="font-mono">
+                    {tx.batchId ? formatAddress(tx.batchId) : "N/A"}
+                  </TableCell>
+                )}
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </CardContent>
+    </Card>
   );
 }

@@ -7,7 +7,11 @@ import { depositFunds, getLayer1Balance, getLayer2Balance } from "@/lib/ethers";
 import { toast } from "@/components/ui/use-toast";
 import { Progress } from "@/components/ui/progress";
 
-export default function DepositCard() {
+interface DepositCardProps {
+  onSuccess?: (transaction: any) => void;
+}
+
+export default function DepositCard({ onSuccess }: DepositCardProps) {
   const { address, isConnected } = useWallet();
   const [amount, setAmount] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -36,10 +40,10 @@ export default function DepositCard() {
   }, [address, isConnected]);
 
   const handleDeposit = async () => {
-    if (!amount || isNaN(Number(amount)) || Number(amount) <= 0) {
+    if (!amount) {
       toast({
-        title: "Invalid Amount",
-        description: "Please enter a valid amount greater than 0",
+        title: "Invalid Input",
+        description: "Please enter an amount to deposit",
         variant: "destructive",
       });
       return;
@@ -56,25 +60,32 @@ export default function DepositCard() {
 
     setIsLoading(true);
     try {
-      await depositFunds(amount);
+      const tx = await depositFunds(amount);
       toast({
-        title: "Deposit Successful",
-        description: `Successfully deposited ${amount} ETH to Layer 2`,
+        title: "Success",
+        description: "Funds deposited successfully",
       });
-      setAmount("");
 
-      // Refresh balances after deposit
-      if (address) {
-        const l1Balance = await getLayer1Balance(address);
-        const l2Balance = await getLayer2Balance(address);
-        setLayer1Balance(l1Balance || "0");
-        setLayer2Balance(l2Balance || "0");
+      // Create transaction object for the callback
+      const transaction = {
+        from: address,
+        to: address, // Self-deposit
+        value: amount,
+        status: 'pending',
+        timestamp: Math.floor(Date.now() / 1000)
+      };
+
+      // Call onSuccess with the transaction data
+      if (onSuccess) {
+        onSuccess(transaction);
       }
+
+      setAmount("");
     } catch (error) {
       console.error("Deposit error:", error);
       toast({
-        title: "Deposit Failed",
-        description: error instanceof Error ? error.message : "Failed to deposit funds",
+        title: "Error",
+        description: "Failed to deposit funds",
         variant: "destructive",
       });
     } finally {
