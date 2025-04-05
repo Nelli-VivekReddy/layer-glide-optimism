@@ -7,7 +7,7 @@ import { getBatches, submitBatchWithMerkleRoot, verifyBatch, finalizeBatch, isAd
 import { useWallet } from "@/hooks/useWallet";
 import { createMerkleTreeFromTransactions, Transaction } from "@/lib/merkleTree";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { AlertCircle, ChevronDown, ChevronRight, CheckCircle, Clock, AlertTriangle } from "lucide-react";
+import { AlertCircle, ChevronDown, ChevronRight, CheckCircle, Clock, AlertTriangle, Plus, Loader2, XCircle, CheckCircle2 } from "lucide-react";
 import { BatchDetails } from './BatchDetails';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
@@ -15,6 +15,7 @@ import { formatEther } from 'ethers';
 import { formatDistanceToNow } from 'date-fns';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Package } from "lucide-react";
 
 interface BatchTransaction {
     from: string;
@@ -44,7 +45,7 @@ interface AdminBatchManagerProps {
 }
 
 export default function AdminBatchManager({ isAdmin, isOperator = false }: AdminBatchManagerProps) {
-    const { address, isConnected, wallet } = useWallet();
+    const { address, isConnected } = useWallet();
     const [batches, setBatches] = useState<Batch[]>([]);
     const [selectedBatch, setSelectedBatch] = useState<Batch | null>(null);
     const [merkleRoot, setMerkleRoot] = useState<string>("");
@@ -369,7 +370,7 @@ export default function AdminBatchManager({ isAdmin, isOperator = false }: Admin
     };
 
     const handleChallengeBatch = async (batchId: string) => {
-        if (!wallet) {
+        if (!address) {
             toast({
                 title: "Error",
                 description: "Please connect your wallet first",
@@ -387,7 +388,7 @@ export default function AdminBatchManager({ isAdmin, isOperator = false }: Admin
                 },
                 body: JSON.stringify({
                     batchId,
-                    challengerAddress: wallet.address
+                    challengerAddress: address
                 }),
             });
 
@@ -417,7 +418,7 @@ export default function AdminBatchManager({ isAdmin, isOperator = false }: Admin
     };
 
     const handleVerifyChallenge = async (batchId: string, isValid: boolean) => {
-        if (!wallet || (!isAdmin && !isOperator)) {
+        if (!address || (!isAdmin && !isOperator)) {
             toast({
                 title: "Error",
                 description: "Only admin or operators can verify challenges",
@@ -436,7 +437,7 @@ export default function AdminBatchManager({ isAdmin, isOperator = false }: Admin
                 body: JSON.stringify({
                     batchId,
                     isValid,
-                    adminAddress: wallet.address
+                    adminAddress: address
                 }),
             });
 
@@ -542,53 +543,65 @@ export default function AdminBatchManager({ isAdmin, isOperator = false }: Admin
     }
 
     return (
-        <Card className="glass-card border border-white/10 backdrop-blur-md bg-black/30">
-            <CardHeader>
-                <CardTitle className="text-2xl bg-gradient-to-r from-purple-400 to-pink-500 bg-clip-text text-transparent">
-                    Batch Management
-                </CardTitle>
-                <CardDescription className="text-white/70">
-                    {isAdmin ? "Manage and verify network batches" : isOperator ? "Operate and verify network batches" : "View network batches"}
-                </CardDescription>
-            </CardHeader>
-            <CardContent>
-                <div className="space-y-4">
+        <Card className="glass-card border border-white/10 backdrop-blur-md bg-black/30 overflow-hidden">
+            <div className="absolute inset-0 bg-gradient-to-r from-purple-500/5 to-pink-500/5 pointer-events-none"></div>
+            <CardHeader className="relative">
+                <div className="flex items-center justify-between">
+                    <div>
+                        <CardTitle className="text-2xl bg-gradient-to-r from-purple-400 to-pink-500 bg-clip-text text-transparent">
+                            Batch Management
+                        </CardTitle>
+                        <CardDescription className="text-white/70">
+                            {isAdmin ? "Manage and verify network batches" : isOperator ? "Operate and verify network batches" : "View network batches"}
+                        </CardDescription>
+                    </div>
                     {(isAdmin || isOperator) && (
                         <Button
                             onClick={handleSubmitBatch}
                             disabled={isLoading}
-                            className="w-full bg-purple-500 hover:bg-purple-600"
+                            className="bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white"
                         >
-                            Submit New Batch
+                            {isLoading ? (
+                                <>
+                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                    Processing...
+                                </>
+                            ) : (
+                                <>
+                                    <Plus className="mr-2 h-4 w-4" />
+                                    Submit New Batch
+                                </>
+                            )}
                         </Button>
                     )}
-
-                    <Tabs defaultValue="all" className="w-full" onValueChange={setActiveTab}>
-                        <TabsList className="grid grid-cols-5 mb-4">
-                            <TabsTrigger value="all">All Batches</TabsTrigger>
-                            <TabsTrigger value="pending">Pending</TabsTrigger>
-                            <TabsTrigger value="verified">In Challenge</TabsTrigger>
-                            <TabsTrigger value="finalized">Finalized</TabsTrigger>
-                            <TabsTrigger value="rejected">Rejected</TabsTrigger>
-                        </TabsList>
-
-                        <TabsContent value="all" className="mt-0">
-                            {renderBatchTable(filteredBatches())}
-                        </TabsContent>
-                        <TabsContent value="pending" className="mt-0">
-                            {renderBatchTable(filteredBatches())}
-                        </TabsContent>
-                        <TabsContent value="verified" className="mt-0">
-                            {renderBatchTable(filteredBatches())}
-                        </TabsContent>
-                        <TabsContent value="finalized" className="mt-0">
-                            {renderBatchTable(filteredBatches())}
-                        </TabsContent>
-                        <TabsContent value="rejected" className="mt-0">
-                            {renderBatchTable(filteredBatches())}
-                        </TabsContent>
-                    </Tabs>
                 </div>
+            </CardHeader>
+            <CardContent className="relative">
+                <Tabs defaultValue="all" className="w-full" onValueChange={setActiveTab}>
+                    <TabsList className="grid grid-cols-5 mb-4 bg-white/5 p-1 rounded-lg">
+                        <TabsTrigger value="all" className="data-[state=active]:bg-white/10">All Batches</TabsTrigger>
+                        <TabsTrigger value="pending" className="data-[state=active]:bg-white/10">Pending</TabsTrigger>
+                        <TabsTrigger value="verified" className="data-[state=active]:bg-white/10">In Challenge</TabsTrigger>
+                        <TabsTrigger value="finalized" className="data-[state=active]:bg-white/10">Finalized</TabsTrigger>
+                        <TabsTrigger value="rejected" className="data-[state=active]:bg-white/10">Rejected</TabsTrigger>
+                    </TabsList>
+
+                    <TabsContent value="all" className="mt-0">
+                        {renderBatchTable(filteredBatches())}
+                    </TabsContent>
+                    <TabsContent value="pending" className="mt-0">
+                        {renderBatchTable(filteredBatches())}
+                    </TabsContent>
+                    <TabsContent value="verified" className="mt-0">
+                        {renderBatchTable(filteredBatches())}
+                    </TabsContent>
+                    <TabsContent value="finalized" className="mt-0">
+                        {renderBatchTable(filteredBatches())}
+                    </TabsContent>
+                    <TabsContent value="rejected" className="mt-0">
+                        {renderBatchTable(filteredBatches())}
+                    </TabsContent>
+                </Tabs>
             </CardContent>
         </Card>
     );
@@ -596,8 +609,14 @@ export default function AdminBatchManager({ isAdmin, isOperator = false }: Admin
     function renderBatchTable(batchesToRender: Batch[]) {
         if (batchesToRender.length === 0) {
             return (
-                <div className="text-center py-8 text-white/70">
-                    No batches found in this category
+                <div className="flex flex-col items-center justify-center py-12 text-center">
+                    <div className="rounded-full bg-white/5 p-4 mb-4">
+                        <Package className="h-8 w-8 text-white/30" />
+                    </div>
+                    <h3 className="text-lg font-medium text-white/70">No batches found</h3>
+                    <p className="text-sm text-white/50 mt-1">
+                        No batches are available in this category
+                    </p>
                 </div>
             );
         }
@@ -609,13 +628,13 @@ export default function AdminBatchManager({ isAdmin, isOperator = false }: Admin
                         key={batch.id}
                         open={expandedBatchId === batch.id}
                         onOpenChange={() => toggleBatchDetails(batch.id)}
-                        className="border border-white/10 rounded-lg overflow-hidden"
+                        className="border border-white/10 rounded-lg overflow-hidden hover:border-white/20 transition-colors"
                     >
                         <div className="p-4 bg-white/5">
                             <div className="flex justify-between items-center">
                                 <div className="flex items-center gap-2">
                                     <CollapsibleTrigger asChild>
-                                        <Button variant="ghost" size="sm" className="p-0 h-8 w-8">
+                                        <Button variant="ghost" size="sm" className="p-0 h-8 w-8 hover:bg-white/10">
                                             {expandedBatchId === batch.id ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                                         </Button>
                                     </CollapsibleTrigger>
@@ -623,7 +642,7 @@ export default function AdminBatchManager({ isAdmin, isOperator = false }: Admin
                                         <h3 className="text-lg font-semibold text-white">
                                             Batch #{batch.batchId}
                                         </h3>
-                                        <p className="text-sm text-white/70">
+                                        <p className="text-sm text-white/70 font-mono">
                                             Root: {batch.transactionsRoot.slice(0, 10)}...{batch.transactionsRoot.slice(-8)}
                                         </p>
                                     </div>
@@ -638,15 +657,17 @@ export default function AdminBatchManager({ isAdmin, isOperator = false }: Admin
                                                 <Button
                                                     onClick={() => handleVerifyBatch(batch.id)}
                                                     disabled={isLoading}
-                                                    className="bg-green-500 hover:bg-green-600"
+                                                    className="bg-green-500/10 text-green-500 hover:bg-green-500/20 border border-green-500/20"
                                                 >
+                                                    <CheckCircle className="mr-2 h-4 w-4" />
                                                     Verify
                                                 </Button>
                                                 <Button
                                                     onClick={() => handleRejectBatch(batch.id)}
                                                     disabled={isLoading}
-                                                    variant="destructive"
+                                                    className="bg-red-500/10 text-red-500 hover:bg-red-500/20 border border-red-500/20"
                                                 >
+                                                    <XCircle className="mr-2 h-4 w-4" />
                                                     Reject
                                                 </Button>
                                             </>
@@ -656,15 +677,17 @@ export default function AdminBatchManager({ isAdmin, isOperator = false }: Admin
                                                 <Button
                                                     onClick={() => handleFinalizeBatch(batch.id)}
                                                     disabled={isLoading}
-                                                    className="bg-blue-500 hover:bg-blue-600"
+                                                    className="bg-blue-500/10 text-blue-500 hover:bg-blue-500/20 border border-blue-500/20"
                                                 >
+                                                    <CheckCircle2 className="mr-2 h-4 w-4" />
                                                     Finalize
                                                 </Button>
                                                 <Button
                                                     onClick={() => handleRejectBatch(batch.id)}
                                                     disabled={isLoading}
-                                                    variant="destructive"
+                                                    className="bg-red-500/10 text-red-500 hover:bg-red-500/20 border border-red-500/20"
                                                 >
+                                                    <XCircle className="mr-2 h-4 w-4" />
                                                     Reject
                                                 </Button>
                                             </>
@@ -673,8 +696,9 @@ export default function AdminBatchManager({ isAdmin, isOperator = false }: Admin
                                             <Button
                                                 onClick={() => handleChallengeBatch(batch.id)}
                                                 disabled={isLoading}
-                                                variant="destructive"
+                                                className="bg-yellow-500/10 text-yellow-500 hover:bg-yellow-500/20 border border-yellow-500/20"
                                             >
+                                                <AlertTriangle className="mr-2 h-4 w-4" />
                                                 Challenge
                                             </Button>
                                         )}
@@ -686,67 +710,97 @@ export default function AdminBatchManager({ isAdmin, isOperator = false }: Admin
                         <CollapsibleContent>
                             <div className="p-4 bg-white/5 border-t border-white/10">
                                 <div className="grid grid-cols-2 gap-4 mb-4">
-                                    <div>
-                                        <h4 className="text-sm font-medium text-white/70">Batch Details</h4>
-                                        <div className="mt-2 space-y-1">
-                                            <p className="text-sm text-white"><span className="text-white/70">ID:</span> {batch.batchId}</p>
-                                            <p className="text-sm text-white"><span className="text-white/70">Merkle Root:</span> {batch.transactionsRoot}</p>
-                                            <p className="text-sm text-white"><span className="text-white/70">Timestamp:</span> {formatTimestamp(new Date(batch.createdAt))}</p>
-                                            <p className="text-sm text-white"><span className="text-white/70">Transactions:</span> {batch.transactions.length}</p>
+                                    <div className="space-y-4">
+                                        <div className="bg-white/5 rounded-lg p-4">
+                                            <h4 className="text-sm font-medium text-white/70 mb-2">Batch Details</h4>
+                                            <div className="space-y-2">
+                                                <p className="text-sm text-white">
+                                                    <span className="text-white/70">ID:</span>{" "}
+                                                    <span className="font-mono">{batch.batchId}</span>
+                                                </p>
+                                                <p className="text-sm text-white">
+                                                    <span className="text-white/70">Merkle Root:</span>{" "}
+                                                    <span className="font-mono">{batch.transactionsRoot}</span>
+                                                </p>
+                                                <p className="text-sm text-white">
+                                                    <span className="text-white/70">Timestamp:</span>{" "}
+                                                    {formatTimestamp(new Date(batch.createdAt))}
+                                                </p>
+                                                <p className="text-sm text-white">
+                                                    <span className="text-white/70">Transactions:</span>{" "}
+                                                    {batch.transactions.length}
+                                                </p>
+                                            </div>
                                         </div>
                                     </div>
-                                    <div>
-                                        <h4 className="text-sm font-medium text-white/70">Status</h4>
-                                        <div className="mt-2 space-y-1">
-                                            <p className="text-sm text-white">
-                                                <span className="text-white/70">Verified:</span> {batch.verified ? "Yes" : "No"}
-                                            </p>
-                                            <p className="text-sm text-white">
-                                                <span className="text-white/70">Finalized:</span> {batch.finalized ? "Yes" : "No"}
-                                            </p>
-                                            <p className="text-sm text-white">
-                                                <span className="text-white/70">Rejected:</span> {batch.rejected ? "Yes" : "No"}
-                                            </p>
-                                            <p className="text-sm text-white">
-                                                <span className="text-white/70">Challenge Period:</span> {batch.verified && !batch.finalized ? "Active" : "Not Active"}
-                                            </p>
+                                    <div className="space-y-4">
+                                        <div className="bg-white/5 rounded-lg p-4">
+                                            <h4 className="text-sm font-medium text-white/70 mb-2">Status</h4>
+                                            <div className="space-y-2">
+                                                <div className="flex items-center justify-between">
+                                                    <span className="text-sm text-white/70">Verified</span>
+                                                    <Badge variant={batch.verified ? "default" : "outline"} className="bg-green-500/10 text-green-500 border-green-500/20">
+                                                        {batch.verified ? "Yes" : "No"}
+                                                    </Badge>
+                                                </div>
+                                                <div className="flex items-center justify-between">
+                                                    <span className="text-sm text-white/70">Finalized</span>
+                                                    <Badge variant={batch.finalized ? "default" : "outline"} className="bg-blue-500/10 text-blue-500 border-blue-500/20">
+                                                        {batch.finalized ? "Yes" : "No"}
+                                                    </Badge>
+                                                </div>
+                                                <div className="flex items-center justify-between">
+                                                    <span className="text-sm text-white/70">Rejected</span>
+                                                    <Badge variant={batch.rejected ? "default" : "outline"} className="bg-red-500/10 text-red-500 border-red-500/20">
+                                                        {batch.rejected ? "Yes" : "No"}
+                                                    </Badge>
+                                                </div>
+                                                <div className="flex items-center justify-between">
+                                                    <span className="text-sm text-white/70">Challenge Period</span>
+                                                    <Badge variant={batch.verified && !batch.finalized ? "default" : "outline"} className="bg-yellow-500/10 text-yellow-500 border-yellow-500/20">
+                                                        {batch.verified && !batch.finalized ? "Active" : "Not Active"}
+                                                    </Badge>
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
 
-                                <h4 className="text-md font-semibold text-white mb-2">Transactions</h4>
-                                <Table>
-                                    <TableHeader>
-                                        <TableRow>
-                                            <TableHead>From</TableHead>
-                                            <TableHead>To</TableHead>
-                                            <TableHead>Amount</TableHead>
-                                            <TableHead>Status</TableHead>
-                                            <TableHead>Timestamp</TableHead>
-                                        </TableRow>
-                                    </TableHeader>
-                                    <TableBody>
-                                        {batch.transactions.map((tx, index) => (
-                                            <TableRow key={index}>
-                                                <TableCell className="font-mono text-sm">
-                                                    {tx.from.slice(0, 6)}...{tx.from.slice(-4)}
-                                                </TableCell>
-                                                <TableCell className="font-mono text-sm">
-                                                    {tx.to.slice(0, 6)}...{tx.to.slice(-4)}
-                                                </TableCell>
-                                                <TableCell>{tx.value} ETH</TableCell>
-                                                <TableCell>
-                                                    <Badge variant={tx.status === 'pending' ? 'outline' : 'default'}>
-                                                        {tx.status}
-                                                    </Badge>
-                                                </TableCell>
-                                                <TableCell>
-                                                    {new Date(tx.createdAt * 1000).toLocaleString()}
-                                                </TableCell>
+                                <div className="bg-white/5 rounded-lg p-4">
+                                    <h4 className="text-md font-semibold text-white mb-4">Transactions</h4>
+                                    <Table>
+                                        <TableHeader>
+                                            <TableRow className="border-white/10 hover:bg-white/5">
+                                                <TableHead className="text-white/70">From</TableHead>
+                                                <TableHead className="text-white/70">To</TableHead>
+                                                <TableHead className="text-white/70">Amount</TableHead>
+                                                <TableHead className="text-white/70">Status</TableHead>
+                                                <TableHead className="text-white/70">Timestamp</TableHead>
                                             </TableRow>
-                                        ))}
-                                    </TableBody>
-                                </Table>
+                                        </TableHeader>
+                                        <TableBody>
+                                            {batch.transactions.map((tx, index) => (
+                                                <TableRow key={index} className="border-white/10 hover:bg-white/5">
+                                                    <TableCell className="font-mono text-sm text-white/80">
+                                                        {tx.from.slice(0, 6)}...{tx.from.slice(-4)}
+                                                    </TableCell>
+                                                    <TableCell className="font-mono text-sm text-white/80">
+                                                        {tx.to.slice(0, 6)}...{tx.to.slice(-4)}
+                                                    </TableCell>
+                                                    <TableCell className="text-white/80">{tx.value} ETH</TableCell>
+                                                    <TableCell>
+                                                        <Badge variant={tx.status === 'pending' ? 'outline' : 'default'} className="bg-white/10">
+                                                            {tx.status}
+                                                        </Badge>
+                                                    </TableCell>
+                                                    <TableCell className="text-white/70">
+                                                        {new Date(tx.createdAt * 1000).toLocaleString()}
+                                                    </TableCell>
+                                                </TableRow>
+                                            ))}
+                                        </TableBody>
+                                    </Table>
+                                </div>
                             </div>
                         </CollapsibleContent>
                     </Collapsible>

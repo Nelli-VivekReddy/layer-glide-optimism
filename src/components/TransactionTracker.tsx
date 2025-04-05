@@ -9,6 +9,9 @@ import { formatEther } from "ethers";
 import { useWallet } from "@/hooks/useWallet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Link } from 'react-router-dom';
+import { Skeleton } from "@/components/ui/skeleton";
+import { RefreshCw, ExternalLink } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 // Helper function to format addresses
 const formatAddress = (address: string) => {
@@ -39,44 +42,44 @@ export function TransactionTracker({ mode, address }: TransactionTrackerProps) {
   const { address: connectedAddress } = useWallet();
   const { toast } = useToast();
 
-  useEffect(() => {
-    const fetchTransactions = async () => {
-      try {
-        setIsLoading(true);
-        const targetAddress = mode === "user" ? (address || connectedAddress) : undefined;
+  const fetchTransactions = async () => {
+    try {
+      setIsLoading(true);
+      const targetAddress = mode === "user" ? (address || connectedAddress) : undefined;
 
-        if (!targetAddress && mode === "user") {
-          console.error("No address provided for user mode");
-          return;
-        }
-
-        const url = mode === "user"
-          ? `http://localhost:5500/api/transactions/user/${targetAddress}`
-          : "http://localhost:5500/api/transactions/network";
-
-        console.log(`Fetching transactions from: ${url}`);
-
-        const response = await fetch(url);
-        if (!response.ok) {
-          throw new Error(`Failed to fetch transactions: ${response.statusText}`);
-        }
-
-        const data = await response.json();
-        console.log(`Fetched ${data.length} transactions:`, data);
-
-        setTransactions(data);
-      } catch (error) {
-        console.error("Error fetching transactions:", error);
-        toast({
-          title: "Error",
-          description: "Failed to fetch transaction history",
-          variant: "destructive",
-        });
-      } finally {
-        setIsLoading(false);
+      if (!targetAddress && mode === "user") {
+        console.error("No address provided for user mode");
+        return;
       }
-    };
 
+      const url = mode === "user"
+        ? `http://localhost:5500/api/transactions/user/${targetAddress}`
+        : "http://localhost:5500/api/transactions/network";
+
+      console.log(`Fetching transactions from: ${url}`);
+
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch transactions: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      console.log(`Fetched ${data.length} transactions:`, data);
+
+      setTransactions(data);
+    } catch (error) {
+      console.error("Error fetching transactions:", error);
+      toast({
+        title: "Error",
+        description: "Failed to fetch transaction history",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
     fetchTransactions();
     // Set up polling for live updates
     const interval = setInterval(fetchTransactions, 5000);
@@ -85,17 +88,16 @@ export function TransactionTracker({ mode, address }: TransactionTrackerProps) {
 
   const getStatusBadge = (status: string) => {
     switch (status.toLowerCase()) {
-      case 'pending':
-        return <Badge variant="secondary">Pending</Badge>;
-      case 'completed':
-      case 'confirmed':
-      case 'verified':
-        return <Badge variant="default">Completed</Badge>;
-      case 'failed':
-      case 'rejected':
-        return <Badge variant="destructive">Failed</Badge>;
+      case "pending":
+        return <Badge variant="outline" className="bg-yellow-500/10 text-yellow-500 border-yellow-500/30">Pending</Badge>;
+      case "verified":
+        return <Badge variant="outline" className="bg-green-500/10 text-green-500 border-green-500/30">Verified</Badge>;
+      case "finalized":
+        return <Badge variant="outline" className="bg-blue-500/10 text-blue-500 border-blue-500/30">Finalized</Badge>;
+      case "rejected":
+        return <Badge variant="outline" className="bg-red-500/10 text-red-500 border-red-500/30">Rejected</Badge>;
       default:
-        return <Badge variant="outline">{status}</Badge>;
+        return <Badge variant="outline" className="bg-gray-500/10 text-gray-500 border-gray-500/30">{status}</Badge>;
     }
   };
 
@@ -147,51 +149,95 @@ export function TransactionTracker({ mode, address }: TransactionTrackerProps) {
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>
-          {mode === "user" ? "Your Transactions" : "Network Transactions"}
-        </CardTitle>
+    <Card className="glass-card border border-white/10 backdrop-blur-md bg-black/30 overflow-hidden">
+      <div className="absolute inset-0 bg-gradient-to-r from-purple-500/5 to-pink-500/5 pointer-events-none"></div>
+      <CardHeader className="relative flex flex-row items-center justify-between">
+        <div>
+          <CardTitle className="text-2xl bg-gradient-to-r from-purple-400 to-pink-500 bg-clip-text text-transparent">
+            {mode === "user" ? "Your Transactions" : "Network Transactions"}
+          </CardTitle>
+          <CardDescription className="text-white/70">
+            {mode === "user"
+              ? "View your recent Layer 2 transactions"
+              : "View all transactions on the Layer 2 network"}
+          </CardDescription>
+        </div>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={fetchTransactions}
+          className="rounded-full bg-white/5 hover:bg-white/10"
+          disabled={isLoading}
+        >
+          <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
+        </Button>
       </CardHeader>
-      <CardContent>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Hash</TableHead>
-              <TableHead>From</TableHead>
-              <TableHead>To</TableHead>
-              <TableHead>Amount</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Time</TableHead>
-              {mode === "network" && <TableHead>Batch ID</TableHead>}
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {transactions.map((tx) => (
-              <TableRow key={tx.hash}>
-                <TableCell className="font-mono">
-                  {formatAddress(tx.hash)}
-                </TableCell>
-                <TableCell className="font-mono">
-                  {formatAddress(tx.from)}
-                </TableCell>
-                <TableCell className="font-mono">
-                  {formatAddress(tx.to)}
-                </TableCell>
-                <TableCell>{formatEther(tx.value)} ETH</TableCell>
-                <TableCell className={getStatusColor(tx.status)}>
-                  {tx.status}
-                </TableCell>
-                <TableCell>{formatTimestamp(tx.createdAt)}</TableCell>
-                {mode === "network" && (
-                  <TableCell className="font-mono">
-                    {tx.batchId ? formatAddress(tx.batchId) : "N/A"}
-                  </TableCell>
-                )}
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+      <CardContent className="relative">
+        {isLoading ? (
+          <div className="space-y-4">
+            <Skeleton className="h-10 w-full bg-white/5" />
+            <Skeleton className="h-10 w-full bg-white/5" />
+            <Skeleton className="h-10 w-full bg-white/5" />
+            <Skeleton className="h-10 w-full bg-white/5" />
+          </div>
+        ) : transactions.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-12 text-center">
+            <div className="rounded-full bg-white/5 p-4 mb-4">
+              <ExternalLink className="h-8 w-8 text-white/30" />
+            </div>
+            <h3 className="text-lg font-medium text-white/70">No transactions found</h3>
+            <p className="text-sm text-white/50 mt-1">
+              {mode === "user"
+                ? "Your transaction history will appear here"
+                : "Network transactions will appear here"}
+            </p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow className="border-white/10 hover:bg-white/5">
+                  <TableHead className="text-white/70">Hash</TableHead>
+                  <TableHead className="text-white/70">From</TableHead>
+                  <TableHead className="text-white/70">To</TableHead>
+                  <TableHead className="text-white/70">Amount</TableHead>
+                  <TableHead className="text-white/70">Status</TableHead>
+                  <TableHead className="text-white/70">Time</TableHead>
+                  {mode === "network" && <TableHead className="text-white/70">Batch ID</TableHead>}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {transactions.map((tx) => (
+                  <TableRow key={tx.hash} className="border-white/10 hover:bg-white/5">
+                    <TableCell className="font-mono text-white/80">
+                      {formatAddress(tx.hash)}
+                    </TableCell>
+                    <TableCell className="font-mono text-white/80">
+                      {formatAddress(tx.from)}
+                    </TableCell>
+                    <TableCell className="font-mono text-white/80">
+                      {formatAddress(tx.to)}
+                    </TableCell>
+                    <TableCell className="font-medium text-white/90">
+                      {formatEther(tx.value)} ETH
+                    </TableCell>
+                    <TableCell>
+                      {getStatusBadge(tx.status)}
+                    </TableCell>
+                    <TableCell className="text-white/70">
+                      {formatTimestamp(tx.createdAt)}
+                    </TableCell>
+                    {mode === "network" && (
+                      <TableCell className="font-mono text-white/80">
+                        {tx.batchId ? formatAddress(tx.batchId) : "N/A"}
+                      </TableCell>
+                    )}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        )}
       </CardContent>
     </Card>
   );

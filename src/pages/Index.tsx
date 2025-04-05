@@ -4,11 +4,12 @@ import DepositCard from "@/components/DepositCard";
 import NetworkStatus from "@/components/NetworkStatus";
 import { TransactionTracker } from "@/components/TransactionTracker";
 import BatchSubmission from "@/components/BatchSubmission";
-import SingleTransaction from '@/components/SingleTransaction';
+import { SingleTransaction } from '@/components/SingleTransaction';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { useWallet } from "@/hooks/useWallet";
 import { toast } from "@/components/ui/use-toast";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export default function Index() {
   const { address } = useAccount();
@@ -66,67 +67,56 @@ export default function Index() {
   };
 
   if (!isConnected) {
-    return null;
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-gradient-to-b from-gray-900 to-black">
+        <Card className="w-full max-w-md glass-card border border-white/10 backdrop-blur-md bg-black/30">
+          <CardHeader>
+            <CardTitle className="text-2xl text-center bg-gradient-to-r from-purple-400 to-pink-500 bg-clip-text text-transparent">Connect Wallet</CardTitle>
+            <CardDescription className="text-center text-white/70">Please connect your wallet to use the Layer 2 platform</CardDescription>
+          </CardHeader>
+        </Card>
+      </div>
+    );
   }
 
   return (
-    <div className="container mx-auto p-4 space-y-6">
-      <div className="grid grid-cols-1 lg:grid-cols-1 gap-6">
-        {/* Left Column */}
-        <div className="lg:col-span-2 space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Network Status</CardTitle>
-              <CardDescription>Current network information and batch status</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <NetworkStatus />
-            </CardContent>
-          </Card>
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <div className="container mx-auto p-4 space-y-8">
+      <div className="grid grid-cols-1 gap-8">
+        {/* Network Status Card */}
+        <Card className="glass-card border border-white/10 backdrop-blur-md bg-black/30 overflow-hidden">
+          <div className="absolute inset-0 bg-gradient-to-r from-purple-500/10 to-pink-500/10 pointer-events-none"></div>
+          <CardHeader className="relative">
+            <CardTitle className="text-2xl bg-gradient-to-r from-purple-400 to-pink-500 bg-clip-text text-transparent">Network Status</CardTitle>
+            <CardDescription className="text-white/70">Current network information and batch status</CardDescription>
+          </CardHeader>
+          <CardContent className="relative">
+            <NetworkStatus />
+          </CardContent>
+        </Card>
+
+        {/* Transaction Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="transform transition-all duration-300 hover:scale-[1.02]">
             <DepositCard onSuccess={handleSuccess} />
+          </div>
+          <div className="transform transition-all duration-300 hover:scale-[1.02]">
             <BatchSubmission onSuccess={handleSuccess} />
+          </div>
+          <div className="transform transition-all duration-300 hover:scale-[1.02]">
             <SingleTransaction onSuccess={handleSuccess} />
           </div>
-          {address && (
+        </div>
+
+        {/* Transaction History */}
+        {address && (
+          <div className="transform transition-all duration-300 hover:scale-[1.01]">
             <TransactionTracker
               mode="user"
               address={address}
               key={refreshTrigger} // Force refresh when transactions occur
             />
-          )}
-        </div>
-
-        {/* Right Column - Network Info */}
-        {/* <div className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Layer 2 Info</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                <div>
-                  <h3 className="font-medium">How It Works</h3>
-                  <ul className="mt-2 space-y-2 text-sm">
-                    <li>• Deposit ETH to Layer 2</li>
-                    <li>• Submit transactions in batches</li>
-                    <li>• Save on gas fees</li>
-                    <li>• Withdraw anytime</li>
-                  </ul>
-                </div>
-                <div>
-                  <h3 className="font-medium">Features</h3>
-                  <ul className="mt-2 space-y-2 text-sm">
-                    <li>• Fast transactions</li>
-                    <li>• Lower costs</li>
-                    <li>• Secure rollups</li>
-                    <li>• Real-time status</li>
-                  </ul>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div> */}
+          </div>
+        )}
       </div>
     </div>
   );

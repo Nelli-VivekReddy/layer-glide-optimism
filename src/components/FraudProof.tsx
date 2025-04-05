@@ -76,39 +76,45 @@ const FraudProof: React.FC = () => {
     };
 
     return (
-        <Card className="w-full max-w-2xl mx-auto">
-            <CardHeader>
-                <CardTitle>Submit Fraud Proof</CardTitle>
-                <CardDescription>
+        <Card className="w-full max-w-2xl mx-auto glass-card border border-white/10 backdrop-blur-md bg-black/30">
+            <div className="absolute inset-0 bg-gradient-to-r from-purple-500/5 to-pink-500/5 pointer-events-none"></div>
+            <CardHeader className="relative">
+                <CardTitle className="text-xl bg-gradient-to-r from-purple-400 to-pink-500 bg-clip-text text-transparent">Submit Fraud Proof</CardTitle>
+                <CardDescription className="text-white/70">
                     Submit a fraud proof to challenge a batch of transactions
                 </CardDescription>
             </CardHeader>
             <form onSubmit={handleSubmit}>
-                <CardContent className="space-y-4">
+                <CardContent className="space-y-4 relative">
                     <div className="space-y-2">
-                        <Label htmlFor="batchId">Batch ID</Label>
+                        <Label htmlFor="batchId" className="text-white/70">Batch ID</Label>
                         <Input
                             id="batchId"
                             placeholder="Enter the batch ID to challenge"
                             value={batchId}
                             onChange={(e) => setBatchId(e.target.value)}
                             required
+                            className="bg-white/5 border-white/10 text-white placeholder:text-white/50"
                         />
                     </div>
                     <div className="space-y-2">
-                        <Label htmlFor="fraudProof">Fraud Proof</Label>
+                        <Label htmlFor="fraudProof" className="text-white/70">Fraud Proof</Label>
                         <Textarea
                             id="fraudProof"
                             placeholder="Enter the fraud proof data"
                             value={fraudProof}
                             onChange={(e) => setFraudProof(e.target.value)}
-                            className="min-h-[200px]"
+                            className="min-h-[200px] bg-white/5 border-white/10 text-white placeholder:text-white/50"
                             required
                         />
                     </div>
                 </CardContent>
-                <CardFooter>
-                    <Button type="submit" disabled={isSubmitting || !address}>
+                <CardFooter className="relative">
+                    <Button
+                        type="submit"
+                        disabled={isSubmitting || !address}
+                        className="bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white"
+                    >
                         {isSubmitting ? 'Submitting...' : 'Submit Fraud Proof'}
                     </Button>
                 </CardFooter>
