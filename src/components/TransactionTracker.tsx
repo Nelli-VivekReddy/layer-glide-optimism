@@ -10,7 +10,7 @@ import { useWallet } from "@/hooks/useWallet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Link } from 'react-router-dom';
 import { Skeleton } from "@/components/ui/skeleton";
-import { RefreshCw, ExternalLink } from "lucide-react";
+import { RefreshCw, ExternalLink, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 // Helper function to format addresses
@@ -34,9 +34,10 @@ interface Transaction {
 interface TransactionTrackerProps {
   mode: "user" | "network";
   address?: string;
+  showOverview?: boolean;
 }
 
-export function TransactionTracker({ mode, address }: TransactionTrackerProps) {
+export function TransactionTracker({ mode, address, showOverview = false }: TransactionTrackerProps) {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const { address: connectedAddress } = useWallet();
@@ -45,13 +46,15 @@ export function TransactionTracker({ mode, address }: TransactionTrackerProps) {
   const fetchTransactions = async () => {
     try {
       setIsLoading(true);
-      const targetAddress = mode === "user" ? (address || connectedAddress) : undefined;
+      const targetAddress = mode === "user" ? address : undefined;
 
       if (!targetAddress && mode === "user") {
-        console.error("No address provided for user mode");
+        setTransactions([]);
+        setIsLoading(false);
         return;
       }
 
+      // Use the correct API endpoint
       const url = mode === "user"
         ? `http://localhost:5500/api/transactions/user/${targetAddress}`
         : "http://localhost:5500/api/transactions/network";
@@ -64,9 +67,32 @@ export function TransactionTracker({ mode, address }: TransactionTrackerProps) {
       }
 
       const data = await response.json();
-      console.log(`Fetched ${data.length} transactions:`, data);
+      console.log('Raw transaction data:', data);
 
-      setTransactions(data);
+      // Check if data is an object with transactions property
+      const transactionsData = Array.isArray(data) ? data : (data.transactions || []);
+
+      // Filter and sort transactions
+      const filteredData = mode === "user"
+        ? transactionsData.filter((tx: Transaction) =>
+          tx && (
+            tx.from?.toLowerCase() === targetAddress?.toLowerCase() ||
+            tx.to?.toLowerCase() === targetAddress?.toLowerCase()
+          )
+        )
+        : transactionsData;
+
+      // Sort transactions by timestamp (newest first)
+      const sortedData = filteredData
+        .filter((tx: Transaction) => tx && tx.createdAt)
+        .sort((a: Transaction, b: Transaction) => {
+          const timeA = typeof a.createdAt === 'string' ? parseInt(a.createdAt) : a.createdAt;
+          const timeB = typeof b.createdAt === 'string' ? parseInt(b.createdAt) : b.createdAt;
+          return timeB - timeA;
+        });
+
+      console.log(`Processed ${sortedData.length} transactions for ${mode} mode`);
+      setTransactions(sortedData);
     } catch (error) {
       console.error("Error fetching transactions:", error);
       toast({
@@ -74,17 +100,24 @@ export function TransactionTracker({ mode, address }: TransactionTrackerProps) {
         description: "Failed to fetch transaction history",
         variant: "destructive",
       });
+      setTransactions([]);
     } finally {
       setIsLoading(false);
     }
   };
 
   useEffect(() => {
+    if (mode === "user" && !address) {
+      setTransactions([]);
+      setIsLoading(false);
+      return;
+    }
+
     fetchTransactions();
     // Set up polling for live updates
     const interval = setInterval(fetchTransactions, 5000);
     return () => clearInterval(interval);
-  }, [mode, address, connectedAddress]);
+  }, [mode, address]);
 
   const getStatusBadge = (status: string) => {
     switch (status.toLowerCase()) {
@@ -134,17 +167,33 @@ export function TransactionTracker({ mode, address }: TransactionTrackerProps) {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center p-8">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
-      </div>
+      <Card className="glass-card border border-white/10 backdrop-blur-md bg-black/30">
+        <CardContent className="py-8">
+          <div className="flex items-center justify-center">
+            <Loader2 className="h-8 w-8 animate-spin text-purple-500" />
+          </div>
+        </CardContent>
+      </Card>
     );
   }
 
   if (transactions.length === 0) {
     return (
-      <div className="p-4 text-gray-500">
-        <p>No transactions found.</p>
-      </div>
+      <Card className="glass-card border border-white/10 backdrop-blur-md bg-black/30">
+        <CardContent className="py-12">
+          <div className="flex flex-col items-center justify-center text-center">
+            <div className="rounded-full bg-white/5 p-4 mb-4">
+              <ExternalLink className="h-8 w-8 text-white/30" />
+            </div>
+            <h3 className="text-lg font-medium text-white/70">No transactions found</h3>
+            <p className="text-sm text-white/50 mt-1">
+              {mode === "user"
+                ? `No transactions found for ${formatAddress(address || '')}`
+                : "No transactions found on the network"}
+            </p>
+          </div>
+        </CardContent>
+      </Card>
     );
   }
 
@@ -154,11 +203,15 @@ export function TransactionTracker({ mode, address }: TransactionTrackerProps) {
       <CardHeader className="relative flex flex-row items-center justify-between">
         <div>
           <CardTitle className="text-2xl bg-gradient-to-r from-purple-400 to-pink-500 bg-clip-text text-transparent">
-            {mode === "user" ? "Your Transactions" : "Network Transactions"}
+            {mode === "user" ? (
+              <>Transactions for {formatAddress(address || '')}</>
+            ) : (
+              "Network Transactions"
+            )}
           </CardTitle>
           <CardDescription className="text-white/70">
             {mode === "user"
-              ? "View your recent Layer 2 transactions"
+              ? `View all Layer 2 transactions for ${formatAddress(address || '')}`
               : "View all transactions on the Layer 2 network"}
           </CardDescription>
         </div>
@@ -173,71 +226,54 @@ export function TransactionTracker({ mode, address }: TransactionTrackerProps) {
         </Button>
       </CardHeader>
       <CardContent className="relative">
-        {isLoading ? (
-          <div className="space-y-4">
-            <Skeleton className="h-10 w-full bg-white/5" />
-            <Skeleton className="h-10 w-full bg-white/5" />
-            <Skeleton className="h-10 w-full bg-white/5" />
-            <Skeleton className="h-10 w-full bg-white/5" />
-          </div>
-        ) : transactions.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-12 text-center">
-            <div className="rounded-full bg-white/5 p-4 mb-4">
-              <ExternalLink className="h-8 w-8 text-white/30" />
-            </div>
-            <h3 className="text-lg font-medium text-white/70">No transactions found</h3>
-            <p className="text-sm text-white/50 mt-1">
-              {mode === "user"
-                ? "Your transaction history will appear here"
-                : "Network transactions will appear here"}
-            </p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow className="border-white/10 hover:bg-white/5">
-                  <TableHead className="text-white/70">Type</TableHead>
-                  <TableHead className="text-white/70">From</TableHead>
-                  <TableHead className="text-white/70">To</TableHead>
-                  <TableHead className="text-white/70">Amount</TableHead>
-                  <TableHead className="text-white/70">Status</TableHead>
-                  <TableHead className="text-white/70">Time</TableHead>
-                  {mode === "network" && <TableHead className="text-white/70">Batch ID</TableHead>}
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {transactions.map((tx) => (
-                  <TableRow key={tx.hash} className="border-white/10 hover:bg-white/5">
-                    <TableCell className="text-white/80">
-                      {getTransactionType(tx.type || 'transfer')}
-                    </TableCell>
-                    <TableCell className="font-mono text-white/80">
-                      {formatAddress(tx.from)}
-                    </TableCell>
-                    <TableCell className="font-mono text-white/80">
-                      {formatAddress(tx.to)}
-                    </TableCell>
-                    <TableCell className="font-medium text-white/90">
-                      {formatEther(tx.value)} ETH
-                    </TableCell>
-                    <TableCell>
-                      {getStatusBadge(tx.status)}
-                    </TableCell>
-                    <TableCell className="text-white/70">
-                      {formatTimestamp(tx.createdAt)}
-                    </TableCell>
-                    {mode === "network" && (
-                      <TableCell className="font-mono text-white/80">
-                        {tx.batchId ? formatAddress(tx.batchId) : "N/A"}
-                      </TableCell>
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow className="border-white/10 hover:bg-white/5">
+                <TableHead className="text-white/70">Type</TableHead>
+                <TableHead className="text-white/70">From</TableHead>
+                <TableHead className="text-white/70">To</TableHead>
+                <TableHead className="text-white/70">Amount</TableHead>
+                <TableHead className="text-white/70">Status</TableHead>
+                <TableHead className="text-white/70">Time</TableHead>
+                <TableHead className="text-white/70">Batch</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {transactions.map((tx) => (
+                <TableRow key={tx.hash} className="border-white/10 hover:bg-white/5">
+                  <TableCell className="text-white/80">
+                    {getTransactionType(tx.type || 'transfer')}
+                  </TableCell>
+                  <TableCell className="font-mono text-white/80">
+                    {formatAddress(tx.from)}
+                  </TableCell>
+                  <TableCell className="font-mono text-white/80">
+                    {formatAddress(tx.to)}
+                  </TableCell>
+                  <TableCell className="font-medium text-white/90">
+                    {formatEther(tx.value)} ETH
+                  </TableCell>
+                  <TableCell>
+                    {getStatusBadge(tx.status)}
+                  </TableCell>
+                  <TableCell className="text-white/70">
+                    {formatTimestamp(tx.createdAt)}
+                  </TableCell>
+                  <TableCell className="font-mono text-white/80">
+                    {tx.batchId ? (
+                      <Badge variant="outline" className="bg-purple-500/10 text-purple-400 border-purple-500/30">
+                        #{formatAddress(tx.batchId)}
+                      </Badge>
+                    ) : (
+                      <span className="text-white/30">-</span>
                     )}
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        )}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
       </CardContent>
     </Card>
   );

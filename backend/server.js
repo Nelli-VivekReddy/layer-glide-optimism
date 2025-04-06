@@ -1040,11 +1040,12 @@ app.get('/api/transactions/user/:address', async (req, res) => {
       return res.status(400).json({ error: 'Address is required' });
     }
 
+    // Get all transactions where the address is either sender or recipient
     const transactions = await prisma.batchTransaction.findMany({
       where: {
         OR: [
-          { from: address },
-          { to: address }
+          { from: address.toLowerCase() },
+          { to: address.toLowerCase() }
         ]
       },
       include: {
@@ -1052,6 +1053,16 @@ app.get('/api/transactions/user/:address', async (req, res) => {
       },
       orderBy: {
         createdAt: 'desc'
+      }
+    });
+
+    // Get Layer 2 balance
+    const balance = await prisma.layer2Balance.findFirst({
+      where: {
+        userAddress: address.toLowerCase()
+      },
+      orderBy: {
+        updatedAt: 'desc'
       }
     });
 
@@ -1084,10 +1095,48 @@ app.get('/api/transactions/user/:address', async (req, res) => {
       }
     });
 
-    res.json(formattedTransactions);
+    res.json({
+      transactions: formattedTransactions,
+      balance: balance?.balance || "0"
+    });
   } catch (error) {
     console.error('Error fetching user transactions:', error);
     res.status(500).json({ error: 'Failed to fetch user transactions' });
+  }
+});
+
+// Get user batches
+app.get('/api/batches/user/:address', async (req, res) => {
+  try {
+    const { address } = req.params;
+    if (!address) {
+      return res.status(400).json({ error: 'Address is required' });
+    }
+
+    // Get all batches where the address is involved in any transaction
+    const batches = await prisma.batch.findMany({
+      where: {
+        transactions: {
+          some: {
+            OR: [
+              { from: address.toLowerCase() },
+              { to: address.toLowerCase() }
+            ]
+          }
+        }
+      },
+      include: {
+        transactions: true
+      },
+      orderBy: {
+        createdAt: 'desc'
+      }
+    });
+
+    res.json(batches);
+  } catch (error) {
+    console.error('Error fetching user batches:', error);
+    res.status(500).json({ error: 'Failed to fetch user batches' });
   }
 });
 

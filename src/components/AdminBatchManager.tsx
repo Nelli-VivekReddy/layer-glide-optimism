@@ -218,10 +218,16 @@ export default function AdminBatchManager({ isAdmin, isOperator = false }: Admin
                 throw new Error('Failed to get contract instance');
             }
 
-            // Get the numeric batch ID from the contract
-            const nextBatchId = await contract.nextBatchId();
-            // Calculate the current batch ID (nextBatchId - 1)
-            const numericBatchId = nextBatchId - 1n;
+            // Find the selected batch
+            const selectedBatch = batches.find(b => b.id === batchId);
+            if (!selectedBatch) {
+                throw new Error('Selected batch not found');
+            }
+
+            // Use the batchId from the selected batch
+            const numericBatchId = BigInt(selectedBatch.batchId);
+
+            console.log(`Verifying batch with ID: ${numericBatchId}`);
 
             // Verify the batch on the contract using the numeric ID
             const tx = await contract.verifyBatch(numericBatchId);
@@ -277,10 +283,16 @@ export default function AdminBatchManager({ isAdmin, isOperator = false }: Admin
                 throw new Error('Failed to get contract instance');
             }
 
-            // Get the numeric batch ID from the contract
-            const nextBatchId = await contract.nextBatchId();
-            // Calculate the current batch ID (nextBatchId - 1)
-            const numericBatchId = nextBatchId - 1n;
+            // Find the selected batch
+            const selectedBatch = batches.find(b => b.id === batchId);
+            if (!selectedBatch) {
+                throw new Error('Selected batch not found');
+            }
+
+            // Use the batchId from the selected batch
+            const numericBatchId = BigInt(selectedBatch.batchId);
+
+            console.log(`Finalizing batch with ID: ${numericBatchId}`);
 
             // Finalize the batch on the contract using the numeric ID
             const tx = await contract.finalizeBatch(numericBatchId);
@@ -312,6 +324,8 @@ export default function AdminBatchManager({ isAdmin, isOperator = false }: Admin
                 description: error instanceof Error ? error.message : 'Failed to finalize batch',
                 variant: "destructive",
             });
+        } finally {
+            setIsLoading(false);
         }
     };
 

@@ -392,17 +392,17 @@ export const submitBatchWithMerkleRoot = async (merkleRoot: string) => {
 };
 
 // Verify a batch
-export const verifyBatch = async (batchId: string) => {
+export const verifyBatch = async (batchId: bigint | number | string) => {
   try {
     const contract = await getContract();
     if (!contract) {
       throw new Error("Failed to get contract instance");
     }
 
-    // Get the numeric batch ID from the contract
-    const nextBatchId = await contract.nextBatchId();
-    // Use the next batch ID - 1 as the current batch ID
-    const numericBatchId = nextBatchId - 1n;
+    // Convert batchId to BigInt if it's not already
+    const numericBatchId = BigInt(batchId);
+
+    console.log(`Verifying batch with ID: ${numericBatchId}`);
 
     // Verify the batch on-chain
     const tx = await contract.verifyBatch(numericBatchId);
@@ -447,10 +447,26 @@ export const finalizeBatch = async (batchId: number) => {
 };
 
 // Report fraud with Merkle proof
-export const reportFraudWithMerkleProof = async (batchId: number, proof: string[]) => {
+export const reportFraudWithMerkleProof = async (
+  batchId: number,
+  fraudProof: string,
+  tx: { sender: string, recipient: string, amount: string },
+  merkleProof: string[]
+) => {
   try {
     const contract = await getContract();
-    const tx = await contract.reportFraud(batchId, proof);
+
+    // Convert amount to wei
+    const amountInWei = parseEther(tx.amount);
+
+    // Create the transaction object
+    const txObj = {
+      sender: tx.sender,
+      recipient: tx.recipient,
+      amount: amountInWei
+    };
+
+    const tx = await contract.reportFraud(batchId, fraudProof, txObj, merkleProof);
     await tx.wait();
     toast({
       title: "Success",
