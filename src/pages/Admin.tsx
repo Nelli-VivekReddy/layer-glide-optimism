@@ -1,99 +1,124 @@
-import { useEffect, useState } from "react";
-import AdminBatchManager from "@/components/AdminBatchManager";
-import { OperatorManager } from "@/components/OperatorManager";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { isAdmin } from "@/lib/ethers";
-import { useWallet } from "@/hooks/useWallet";
-import { useToast } from "@/components/ui/use-toast";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { AlertCircle } from "lucide-react";
+import React, { useState, useEffect } from 'react';
+import AdminBatchManager from '../components/AdminBatchManager';
+import AdminSettings from '../components/AdminSettings';
+import { useWallet } from '../hooks/useWallet';
+import { Card, CardContent } from '../components/ui/card';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
+import { isAdmin } from '../lib/ethers';
+import { useNavigate } from 'react-router-dom';
+import { AlertCircle } from 'lucide-react';
+import { Alert, AlertDescription, AlertTitle } from '../components/ui/alert';
 
-export default function Admin() {
+const AdminPage: React.FC = () => {
   const { address, isConnected } = useWallet();
   const [isAdminUser, setIsAdminUser] = useState(false);
-  const [isCheckingAdmin, setIsCheckingAdmin] = useState(true);
-  const { toast } = useToast();
+  const [isLoading, setIsLoading] = useState(true);
+  const navigate = useNavigate();
 
   useEffect(() => {
     const checkAdminStatus = async () => {
       if (!address) {
         setIsAdminUser(false);
-        setIsCheckingAdmin(false);
+        setIsLoading(false);
         return;
       }
 
       try {
-        const adminStatus = await isAdmin(address);
-        setIsAdminUser(adminStatus);
+        const response = await fetch(`http://localhost:5500/api/admin/check?address=${address}`);
+        const data = await response.json();
+
+        if (!data.success || !data.isAdmin) {
+          setIsAdminUser(false);
+          // Redirect non-admin users to home page
+          navigate('/');
+        } else {
+          setIsAdminUser(true);
+        }
       } catch (error) {
-        console.error("Error checking admin status:", error);
+        console.error('Error checking admin status:', error);
         setIsAdminUser(false);
+        // Redirect on error
+        navigate('/');
       } finally {
-        setIsCheckingAdmin(false);
+        setIsLoading(false);
       }
     };
 
     checkAdminStatus();
-  }, [address]);
+  }, [address, navigate]);
 
-  if (!isConnected) {
+  if (isLoading) {
     return (
-      <div className="container mx-auto p-4">
-        <Alert>
-          <AlertCircle className="h-4 w-4" />
-          <AlertTitle>Not Connected</AlertTitle>
-          <AlertDescription>
-            Please connect your wallet to access the admin dashboard.
-          </AlertDescription>
-        </Alert>
+      <div className="container mx-auto py-8">
+        <Card className="glass-card border border-white/10 backdrop-blur-md bg-black/30">
+          <CardContent className="py-8">
+            <div className="text-center text-white/70">
+              Checking admin privileges...
+            </div>
+          </CardContent>
+        </Card>
       </div>
     );
   }
 
-  if (isCheckingAdmin) {
+  if (!isConnected) {
     return (
-      <div className="container mx-auto p-4">
-        <Alert>
-          <AlertCircle className="h-4 w-4" />
-          <AlertTitle>Checking Access</AlertTitle>
-          <AlertDescription>
-            Verifying admin privileges...
-          </AlertDescription>
-        </Alert>
+      <div className="container mx-auto py-8">
+        <Card className="glass-card border border-white/10 backdrop-blur-md bg-black/30">
+          <CardContent className="py-8">
+            <div className="text-center text-white/70">
+              Please connect your wallet to access the admin panel
+            </div>
+          </CardContent>
+        </Card>
       </div>
     );
   }
 
   if (!isAdminUser) {
     return (
-      <div className="container mx-auto p-4">
-        <Alert variant="destructive">
-          <AlertCircle className="h-4 w-4" />
-          <AlertTitle>Access Denied</AlertTitle>
-          <AlertDescription>
-            You do not have admin privileges. Please use an admin account.
-          </AlertDescription>
-        </Alert>
+      <div className="container mx-auto py-8">
+        <Card className="glass-card border border-white/10 backdrop-blur-md bg-black/30">
+          <CardContent className="py-8">
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertTitle>Access Denied</AlertTitle>
+              <AlertDescription>
+                You do not have admin privileges. Only authorized addresses can access this panel.
+              </AlertDescription>
+            </Alert>
+          </CardContent>
+        </Card>
       </div>
     );
   }
 
   return (
-    <div className="container mx-auto p-4 space-y-4">
-      <Card>
-        <CardHeader>
-          <CardTitle>Admin Dashboard</CardTitle>
-          <CardDescription>
-            Manage batches and operators for the Layer 2 scaling solution
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            <OperatorManager />
-            <AdminBatchManager />
-          </div>
-        </CardContent>
-      </Card>
+    <div className="container mx-auto py-8 space-y-8">
+      <h1 className="text-3xl font-bold text-center bg-gradient-to-r from-purple-400 to-pink-500 bg-clip-text text-transparent">
+        Admin Panel
+      </h1>
+
+      <Tabs defaultValue="batches" className="w-full">
+        <TabsList className="grid w-full grid-cols-2 mb-6">
+          <TabsTrigger value="batches" className="data-[state=active]:bg-white/10">
+            Batch Management
+          </TabsTrigger>
+          <TabsTrigger value="settings" className="data-[state=active]:bg-white/10">
+            Settings
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="batches">
+          <AdminBatchManager isAdmin={isAdminUser} />
+        </TabsContent>
+
+        <TabsContent value="settings">
+          <AdminSettings />
+        </TabsContent>
+      </Tabs>
     </div>
   );
-}
+};
+
+export default AdminPage;

@@ -1,325 +1,398 @@
-import { useState, useEffect } from "react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { useToast } from "@/components/ui/use-toast";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import { getBatches, getBatchTransactions } from "@/lib/ethers";
-import { createMerkleTreeFromTransactions } from "@/lib/merkle";
-import { Progress } from "@/components/ui/progress";
+import React, { useState, useEffect } from 'react';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Badge } from '@/components/ui/badge';
+import { useToast } from '@/components/ui/use-toast';
+import { ethers } from 'ethers';
+import { useWallet } from "@/hooks/useWallet";
+import { formatDistanceToNow } from "date-fns";
+import { formatEther } from "ethers";
+import { Loader2, Package, ChevronDown, ChevronUp } from "lucide-react";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+
+interface Transaction {
+    id: string;
+    from: string;
+    to: string;
+    value: string;
+    status: string;
+    batchId: string | null;
+    createdAt: string;
+}
 
 interface Batch {
     id: string;
+    batchId: string;
     transactionsRoot: string;
-    timestamp: number;
     verified: boolean;
     finalized: boolean;
-    challengePeriodEnd: number;
+    rejected: boolean;
+    rejectionReason?: string;
+    createdAt: number | string;
+    transactions: Transaction[];
+    status: string;
+    merkleRoot?: string;
+    submitter?: string;
 }
 
-interface BatchDetails {
-    batch: Batch;
-    transactions: any[];
-    merkleRoot: string;
-    merkleProof?: string[];
+interface BatchManagerProps {
+    address?: string;
 }
 
-export function BatchManager() {
+const formatAddress = (address: string) => {
+    return `${address.slice(0, 6)}...${address.slice(-4)}`;
+};
+
+export function BatchManager({ address }: BatchManagerProps) {
     const [batches, setBatches] = useState<Batch[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [selectedBatch, setSelectedBatch] = useState<BatchDetails | null>(null);
-    const [showBatchDetails, setShowBatchDetails] = useState(false);
+    const [isLoading, setIsLoading] = useState(true);
+    const [expandedBatch, setExpandedBatch] = useState<string | null>(null);
+    const { address: connectedAddress } = useWallet();
     const { toast } = useToast();
-
-    useEffect(() => {
-        fetchBatches();
-        // Refresh every 30 seconds
-        const interval = setInterval(fetchBatches, 30000);
-        return () => clearInterval(interval);
-    }, []);
 
     const fetchBatches = async () => {
         try {
-            setLoading(true);
-            const batchList = await getBatches();
-            setBatches(batchList);
-        } catch (error) {
-            console.error("Error fetching batches:", error);
-            toast({
-                title: "Error",
-                description: "Failed to fetch batches",
-                variant: "destructive",
-            });
-        } finally {
-            setLoading(false);
-        }
-    };
+            setIsLoading(true);
+            const url = address
+                ? `http://localhost:5500/api/batches/user/${address}`
+                : "http://localhost:5500/api/batches";
 
-    const handleViewBatchDetails = async (batch: Batch) => {
-        try {
-            const batchTransactions = await getBatchTransactions(batch.id);
+            console.log('Fetching batches from:', url);
+            const response = await fetch(url);
 
-            // If there are no transactions, just show the batch details without Merkle info
-            if (batchTransactions.length === 0) {
-                setSelectedBatch({
-                    batch,
-                    transactions: [],
-                    merkleRoot: batch.transactionsRoot,
-                    merkleProof: []
-                });
-                setShowBatchDetails(true);
+            if (!response.ok) {
+                if (response.status === 404) {
+                    console.log('No batches found');
+                    setBatches([]);
+                    return;
+                }
+                throw new Error(`Failed to fetch batches: ${response.statusText}`);
+            }
+
+            const data = await response.json();
+            console.log('Raw batch data:', data);
+
+            if (!Array.isArray(data)) {
+                console.error('Expected array of batches but got:', typeof data);
+                setBatches([]);
                 return;
             }
 
-            // Format transactions for Merkle tree
-            const formattedTransactions = batchTransactions.map(tx => ({
-                from: tx.from,
-                to: tx.to,
-                value: tx.value
-            }));
+            // Sort batches by timestamp (newest first)
+            const sortedBatches = data
+                .filter((batch: Batch) => batch && batch.createdAt)
+                .map((batch: Batch) => ({
+                    ...batch,
+                    transactions: Array.isArray(batch.transactions) ? batch.transactions : []
+                }))
+                .sort((a: Batch, b: Batch) => {
+                    const timeA = typeof a.createdAt === 'string' ? parseInt(a.createdAt) : a.createdAt;
+                    const timeB = typeof b.createdAt === 'string' ? parseInt(b.createdAt) : b.createdAt;
+                    return timeB - timeA;
+                });
 
-            const merkleTree = createMerkleTreeFromTransactions(formattedTransactions);
-
-            setSelectedBatch({
-                batch,
-                transactions: batchTransactions,
-                merkleRoot: merkleTree.getHexRoot(),
-                merkleProof: merkleTree.getHexProof(merkleTree.getLeaves()[0]) // Get proof for first transaction
-            });
-            setShowBatchDetails(true);
+            console.log(`Processed ${sortedBatches.length} batches`);
+            setBatches(sortedBatches);
         } catch (error) {
-            console.error("Error fetching batch details:", error);
-            // Show batch details without Merkle info if there's an error
-            setSelectedBatch({
-                batch,
-                transactions: [],
-                merkleRoot: batch.transactionsRoot,
-                merkleProof: []
-            });
-            setShowBatchDetails(true);
+            console.error('Error fetching batches:', error);
             toast({
-                title: "Warning",
-                description: "Could not load complete batch details. Some information may be missing.",
-                variant: "warning",
+                title: 'Error',
+                description: 'Failed to fetch batches: ' + (error as Error).message,
+                variant: 'destructive',
             });
+            setBatches([]);
+        } finally {
+            setIsLoading(false);
         }
     };
 
-    const formatTimestamp = (timestamp: number) => {
-        return new Date(timestamp * 1000).toLocaleString();
+    useEffect(() => {
+        fetchBatches();
+        const interval = setInterval(fetchBatches, 5000);
+        return () => clearInterval(interval);
+    }, [address]);
+
+    const createBatch = async () => {
+        try {
+            setIsLoading(true);
+            const response = await fetch('http://localhost:5500/api/rollup/batch/create', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to create batch');
+            }
+
+            const result = await response.json();
+
+            if (result.success) {
+                toast({
+                    title: 'Success',
+                    description: `Created batch with ${result.transactionCount} transactions`,
+                });
+                fetchBatches();
+            } else {
+                toast({
+                    title: 'Error',
+                    description: result.message || 'Failed to create batch',
+                    variant: 'destructive',
+                });
+            }
+        } catch (error) {
+            console.error('Error creating batch:', error);
+            toast({
+                title: 'Error',
+                description: 'Failed to create batch',
+                variant: 'destructive',
+            });
+        } finally {
+            setIsLoading(false);
+        }
     };
 
-    const calculateChallengeProgress = (batch: Batch) => {
-        if (!batch.verified || batch.finalized) return 100;
-        const now = Math.floor(Date.now() / 1000);
-        const progress = ((now - batch.timestamp) / (batch.challengePeriodEnd - batch.timestamp)) * 100;
-        return Math.min(Math.max(progress, 0), 100);
+    const verifyBatch = async (batchId: string) => {
+        try {
+            setIsLoading(true);
+            const response = await fetch('http://localhost:5500/api/rollup/batch/verify', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ batchId }),
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to verify batch');
+            }
+
+            const result = await response.json();
+
+            if (result.success) {
+                toast({
+                    title: 'Success',
+                    description: 'Batch verified successfully',
+                });
+                fetchBatches();
+            } else {
+                toast({
+                    title: 'Error',
+                    description: result.message || 'Failed to verify batch',
+                    variant: 'destructive',
+                });
+            }
+        } catch (error) {
+            console.error('Error verifying batch:', error);
+            toast({
+                title: 'Error',
+                description: 'Failed to verify batch',
+                variant: 'destructive',
+            });
+        } finally {
+            setIsLoading(false);
+        }
     };
 
-    const getRemainingTime = (batch: Batch) => {
-        if (!batch.verified || batch.finalized) return null;
-        const now = Math.floor(Date.now() / 1000);
-        const remaining = batch.challengePeriodEnd - now;
-        if (remaining <= 0) return "Challenge period complete";
+    const finalizeBatch = async (batchId: string) => {
+        try {
+            setIsLoading(true);
+            const response = await fetch('http://localhost:5500/api/rollup/batch/finalize', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ batchId }),
+            });
 
-        const days = Math.floor(remaining / 86400);
-        const hours = Math.floor((remaining % 86400) / 3600);
-        const minutes = Math.floor((remaining % 3600) / 60);
+            if (!response.ok) {
+                throw new Error('Failed to finalize batch');
+            }
 
-        return `${days}d ${hours}h ${minutes}m remaining in challenge period`;
+            const result = await response.json();
+
+            if (result.success) {
+                toast({
+                    title: 'Success',
+                    description: 'Batch finalized successfully',
+                });
+                fetchBatches();
+            } else {
+                toast({
+                    title: 'Error',
+                    description: result.message || 'Failed to finalize batch',
+                    variant: 'destructive',
+                });
+            }
+        } catch (error) {
+            console.error('Error finalizing batch:', error);
+            toast({
+                title: 'Error',
+                description: 'Failed to finalize batch',
+                variant: 'destructive',
+            });
+        } finally {
+            setIsLoading(false);
+        }
     };
+
+    const getStatusBadge = (status: string | undefined) => {
+        if (!status) {
+            return <Badge variant="outline" className="bg-gray-500/10 text-gray-500 border-gray-500/30">Unknown</Badge>;
+        }
+
+        switch (status.toLowerCase()) {
+            case "pending":
+                return <Badge variant="outline" className="bg-yellow-500/10 text-yellow-500 border-yellow-500/30">Pending</Badge>;
+            case "verified":
+                return <Badge variant="outline" className="bg-green-500/10 text-green-500 border-green-500/30">Verified</Badge>;
+            case "finalized":
+                return <Badge variant="outline" className="bg-blue-500/10 text-blue-500 border-blue-500/30">Finalized</Badge>;
+            case "rejected":
+                return <Badge variant="outline" className="bg-red-500/10 text-red-500 border-red-500/30">Rejected</Badge>;
+            default:
+                return <Badge variant="outline" className="bg-gray-500/10 text-gray-500 border-gray-500/30">{status}</Badge>;
+        }
+    };
+
+    const formatTimestamp = (timestamp: number | string) => {
+        if (!timestamp) return 'Unknown';
+        try {
+            const timestampNum = typeof timestamp === 'string' ? parseInt(timestamp) : timestamp;
+            const date = new Date(timestampNum * 1000);
+            if (isNaN(date.getTime())) return 'Invalid date';
+            return formatDistanceToNow(date, { addSuffix: true });
+        } catch (error) {
+            console.error('Error formatting timestamp:', error);
+            return 'Invalid date';
+        }
+    };
+
+    if (isLoading) {
+        return (
+            <Card className="glass-card border border-white/10 backdrop-blur-md bg-black/30">
+                <CardContent className="py-8">
+                    <div className="flex items-center justify-center">
+                        <Loader2 className="h-8 w-8 animate-spin text-purple-500" />
+                    </div>
+                </CardContent>
+            </Card>
+        );
+    }
+
+    if (batches.length === 0) {
+        return (
+            <Card className="glass-card border border-white/10 backdrop-blur-md bg-black/30">
+                <CardContent className="py-12">
+                    <div className="flex flex-col items-center justify-center text-center">
+                        <div className="rounded-full bg-white/5 p-4 mb-4">
+                            <Package className="h-8 w-8 text-white/30" />
+                        </div>
+                        <h3 className="text-lg font-medium text-white/70">No batches found</h3>
+                        <p className="text-sm text-white/50 mt-1">
+                            {address
+                                ? `No batches found for ${formatAddress(address)}`
+                                : "No batches have been submitted yet"}
+                        </p>
+                    </div>
+                </CardContent>
+            </Card>
+        );
+    }
 
     return (
-        <div className="space-y-6">
-            <Card>
-                <CardHeader>
-                    <CardTitle>Transaction Batches</CardTitle>
-                    <CardDescription>
-                        View transaction batches and their current status on the Layer 2 network
-                    </CardDescription>
-                </CardHeader>
-                <CardContent>
-                    {loading ? (
-                        <div className="text-center py-4">Loading batches...</div>
-                    ) : batches.length === 0 ? (
-                        <div className="text-center py-4">No batches found</div>
-                    ) : (
-                        <Table>
-                            <TableHeader>
-                                <TableRow>
-                                    <TableHead>Batch ID</TableHead>
-                                    <TableHead>Transactions Root</TableHead>
-                                    <TableHead>Timestamp</TableHead>
-                                    <TableHead>Status</TableHead>
-                                    <TableHead>Challenge Period</TableHead>
-                                    <TableHead>Actions</TableHead>
-                                </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                                {batches.map((batch) => (
-                                    <TableRow key={batch.id}>
-                                        <TableCell className="font-mono">{batch.id}</TableCell>
-                                        <TableCell className="font-mono">{batch.transactionsRoot.slice(0, 10)}...</TableCell>
-                                        <TableCell>{formatTimestamp(batch.timestamp)}</TableCell>
-                                        <TableCell>
-                                            <div className="flex gap-2">
-                                                <Badge variant={batch.verified ? "success" : "warning"}>
-                                                    {batch.verified ? "Verified" : "Pending"}
-                                                </Badge>
-                                                {batch.verified && (
-                                                    <Badge variant={batch.finalized ? "success" : "warning"}>
-                                                        {batch.finalized ? "Finalized" : "In Challenge Period"}
-                                                    </Badge>
-                                                )}
+        <Card className="glass-card border border-white/10 backdrop-blur-md bg-black/30">
+            <CardHeader>
+                <CardTitle className="text-2xl bg-gradient-to-r from-purple-400 to-pink-500 bg-clip-text text-transparent">
+                    {address ? `Batches for ${formatAddress(address)}` : "All Batches"}
+                </CardTitle>
+                <CardDescription className="text-white/70">
+                    {address
+                        ? `View all batches involving ${formatAddress(address)}`
+                        : "View all submitted transaction batches"}
+                </CardDescription>
+            </CardHeader>
+            <CardContent>
+                <div className="space-y-4">
+                    {batches.map((batch) => (
+                        <Collapsible
+                            key={batch.id}
+                            open={expandedBatch === batch.id}
+                            onOpenChange={() => setExpandedBatch(expandedBatch === batch.id ? null : batch.id)}
+                        >
+                            <Card className="bg-white/5 border-white/10">
+                                <CollapsibleTrigger asChild>
+                                    <CardContent className="p-4 flex items-center justify-between cursor-pointer hover:bg-white/5">
+                                        <div className="space-y-1">
+                                            <div className="flex items-center gap-2">
+                                                <span className="font-mono text-sm text-white/70">#{formatAddress(batch.id)}</span>
+                                                {getStatusBadge(batch.status)}
                                             </div>
-                                        </TableCell>
-                                        <TableCell>
-                                            {batch.verified && !batch.finalized && (
-                                                <div className="space-y-2">
-                                                    <Progress value={calculateChallengeProgress(batch)} />
-                                                    <p className="text-sm text-muted-foreground">
-                                                        {getRemainingTime(batch)}
-                                                    </p>
-                                                </div>
+                                            <div className="text-xs text-white/50">
+                                                {formatTimestamp(batch.createdAt)}
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-4">
+                                            <div className="text-sm text-white/70">
+                                                {batch.transactions.length} transaction{batch.transactions.length !== 1 ? 's' : ''}
+                                            </div>
+                                            {expandedBatch === batch.id ? (
+                                                <ChevronUp className="h-4 w-4 text-white/50" />
+                                            ) : (
+                                                <ChevronDown className="h-4 w-4 text-white/50" />
                                             )}
-                                        </TableCell>
-                                        <TableCell>
-                                            <Button
-                                                variant="outline"
-                                                size="sm"
-                                                onClick={() => handleViewBatchDetails(batch)}
-                                            >
-                                                View Details
-                                            </Button>
-                                        </TableCell>
-                                    </TableRow>
-                                ))}
-                            </TableBody>
-                        </Table>
-                    )}
-                </CardContent>
-            </Card>
-
-            <Card>
-                <CardHeader>
-                    <CardTitle>Understanding Batch Processing</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                    <div>
-                        <h3 className="font-semibold mb-2">Batch States</h3>
-                        <ul className="space-y-2">
-                            <li className="flex items-center gap-2">
-                                <Badge variant="warning">Pending</Badge>
-                                <span>The batch has been submitted and is awaiting verification</span>
-                            </li>
-                            <li className="flex items-center gap-2">
-                                <Badge variant="warning">In Challenge Period</Badge>
-                                <span>The batch is verified and in the 7-day fraud proof window</span>
-                            </li>
-                            <li className="flex items-center gap-2">
-                                <Badge variant="success">Finalized</Badge>
-                                <span>The batch has completed the challenge period and state updates are final</span>
-                            </li>
-                        </ul>
-                    </div>
-
-                    <div>
-                        <h3 className="font-semibold mb-2">Fraud Proof Window</h3>
-                        <Alert>
-                            <AlertDescription>
-                                After a batch is verified, it enters a 7-day challenge period. During this time,
-                                the network monitors for any potential fraud proofs. Once the period ends without
-                                any valid fraud proofs, the batch is automatically finalized.
-                            </AlertDescription>
-                        </Alert>
-                    </div>
-                </CardContent>
-            </Card>
-
-            <Dialog open={showBatchDetails} onOpenChange={setShowBatchDetails}>
-                <DialogContent className="max-w-3xl">
-                    <DialogHeader>
-                        <DialogTitle>Batch Details</DialogTitle>
-                        <DialogDescription>
-                            View batch transactions and Merkle tree information
-                        </DialogDescription>
-                    </DialogHeader>
-                    {selectedBatch && (
-                        <div className="space-y-4">
-                            <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                    <h3 className="font-semibold">Batch ID</h3>
-                                    <p className="font-mono">{selectedBatch.batch.id}</p>
-                                </div>
-                                <div>
-                                    <h3 className="font-semibold">Merkle Root</h3>
-                                    <p className="font-mono">{selectedBatch.merkleRoot}</p>
-                                </div>
-                                <div>
-                                    <h3 className="font-semibold">Status</h3>
-                                    <div className="flex gap-2">
-                                        <Badge variant={selectedBatch.batch.verified ? "success" : "warning"}>
-                                            {selectedBatch.batch.verified ? "Verified" : "Pending"}
-                                        </Badge>
-                                        {selectedBatch.batch.verified && (
-                                            <Badge variant={selectedBatch.batch.finalized ? "success" : "warning"}>
-                                                {selectedBatch.batch.finalized ? "Finalized" : "In Challenge Period"}
-                                            </Badge>
+                                        </div>
+                                    </CardContent>
+                                </CollapsibleTrigger>
+                                <CollapsibleContent>
+                                    <div className="px-4 pb-4">
+                                        <div className="rounded-lg overflow-hidden">
+                                            <Table>
+                                                <TableHeader>
+                                                    <TableRow className="border-white/10 hover:bg-white/5">
+                                                        <TableHead className="text-white/70">From</TableHead>
+                                                        <TableHead className="text-white/70">To</TableHead>
+                                                        <TableHead className="text-white/70">Amount</TableHead>
+                                                        <TableHead className="text-white/70">Status</TableHead>
+                                                    </TableRow>
+                                                </TableHeader>
+                                                <TableBody>
+                                                    {batch.transactions.map((tx) => (
+                                                        <TableRow key={tx.id} className="border-white/10 hover:bg-white/5">
+                                                            <TableCell className="font-mono text-sm text-white/80">
+                                                                {formatAddress(tx.from)}
+                                                            </TableCell>
+                                                            <TableCell className="font-mono text-sm text-white/80">
+                                                                {formatAddress(tx.to)}
+                                                            </TableCell>
+                                                            <TableCell className="text-white/90">
+                                                                {formatEther(tx.value)} ETH
+                                                            </TableCell>
+                                                            <TableCell>
+                                                                {getStatusBadge(tx.status)}
+                                                            </TableCell>
+                                                        </TableRow>
+                                                    ))}
+                                                </TableBody>
+                                            </Table>
+                                        </div>
+                                        {batch.merkleRoot && (
+                                            <div className="mt-4 p-3 rounded bg-white/5 border border-white/10">
+                                                <div className="text-xs text-white/50 mb-1">Merkle Root</div>
+                                                <div className="font-mono text-sm text-white/80 break-all">
+                                                    {batch.merkleRoot}
+                                                </div>
+                                            </div>
                                         )}
                                     </div>
-                                </div>
-                                <div>
-                                    <h3 className="font-semibold">Timestamp</h3>
-                                    <p>{formatTimestamp(selectedBatch.batch.timestamp)}</p>
-                                </div>
-                            </div>
-
-                            <div>
-                                <h3 className="font-semibold mb-2">Merkle Proof (Example)</h3>
-                                <div className="bg-muted p-2 rounded-md">
-                                    <pre className="text-sm overflow-x-auto">
-                                        {JSON.stringify(selectedBatch.merkleProof, null, 2)}
-                                    </pre>
-                                </div>
-                            </div>
-
-                            <div>
-                                <h3 className="font-semibold mb-2">Transactions</h3>
-                                <Table>
-                                    <TableHeader>
-                                        <TableRow>
-                                            <TableHead>From</TableHead>
-                                            <TableHead>To</TableHead>
-                                            <TableHead>Value</TableHead>
-                                            <TableHead>Status</TableHead>
-                                        </TableRow>
-                                    </TableHeader>
-                                    <TableBody>
-                                        {selectedBatch.transactions.map((tx, index) => (
-                                            <TableRow key={index}>
-                                                <TableCell className="font-mono">
-                                                    {tx.from.slice(0, 6)}...{tx.from.slice(-4)}
-                                                </TableCell>
-                                                <TableCell className="font-mono">
-                                                    {tx.to.slice(0, 6)}...{tx.to.slice(-4)}
-                                                </TableCell>
-                                                <TableCell>{tx.value} ETH</TableCell>
-                                                <TableCell>
-                                                    <Badge variant={tx.status === "confirmed" ? "success" : "destructive"}>
-                                                        {tx.status}
-                                                    </Badge>
-                                                </TableCell>
-                                            </TableRow>
-                                        ))}
-                                    </TableBody>
-                                </Table>
-                            </div>
-                        </div>
-                    )}
-                </DialogContent>
-            </Dialog>
-        </div>
+                                </CollapsibleContent>
+                            </Card>
+                        </Collapsible>
+                    ))}
+                </div>
+            </CardContent>
+        </Card>
     );
 } 

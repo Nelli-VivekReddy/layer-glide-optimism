@@ -1,318 +1,280 @@
 import React, { useEffect, useState } from 'react';
-import { useAccount } from 'wagmi';
-import { getTransactionHistory, getGasPrice, TransactionStatus, TransactionHistory, TransactionEvent, TransactionReceipt } from '@/lib/ethers';
-import { formatEther } from 'ethers';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import { getTransactionStatus, subscribeToTransactionEvents } from "@/lib/ethers";
-import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/use-toast";
-import { createMerkleTreeFromTransactions } from "@/lib/merkle";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { getTransactionHistory, getLayer2Balance, getLayer1Balance } from '@/lib/ethers';
+import { formatDistanceToNow } from "date-fns";
+import { formatEther } from "ethers";
+import { useWallet } from "@/hooks/useWallet";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Link } from 'react-router-dom';
+import { Skeleton } from "@/components/ui/skeleton";
+import { RefreshCw, ExternalLink, Loader2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
-interface TransactionTrackerProps {
-  address?: string;
-  onSuccess?: () => void;
-}
+// Helper function to format addresses
+const formatAddress = (address: string) => {
+  return `${address.slice(0, 6)}...${address.slice(-4)}`;
+};
 
+// Define the Transaction interface
 interface Transaction {
   hash: string;
   from: string;
   to: string;
   value: string;
   status: string;
-  gasPrice: string;
-  timestamp: number;
+  createdAt: number;
   batchId?: string;
+  type?: string;
+  isInBatch?: boolean;
 }
 
-interface BatchDetails {
-  id: string;
-  transactions: Transaction[];
-  merkleRoot: string;
-  merkleProof?: string[];
+interface TransactionTrackerProps {
+  mode: "user" | "network";
+  address?: string;
+  showOverview?: boolean;
 }
 
-export function TransactionTracker({ address, onSuccess }: TransactionTrackerProps) {
+export function TransactionTracker({ mode, address, showOverview = false }: TransactionTrackerProps) {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [gasPrice, setGasPrice] = useState<string>('0');
-  const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState("all");
-  const [selectedBatch, setSelectedBatch] = useState<BatchDetails | null>(null);
-  const [showBatchDetails, setShowBatchDetails] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const { address: connectedAddress } = useWallet();
   const { toast } = useToast();
 
-  const fetchData = async () => {
-    if (!address) return;
-
+  const fetchTransactions = async () => {
     try {
-      setLoading(true);
-      const txHistory = await getTransactionHistory(address);
-      setTransactions(txHistory);
-    } catch (error) {
-      console.error("Error fetching transaction data:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
+      setIsLoading(true);
+      const targetAddress = mode === "user" ? address : undefined;
 
-  useEffect(() => {
-    if (address) {
-      fetchData();
-      // Refresh every 10 seconds
-      const interval = setInterval(fetchData, 10000);
-      return () => clearInterval(interval);
-    }
-  }, [address]);
+      if (!targetAddress && mode === "user") {
+        setTransactions([]);
+        setIsLoading(false);
+        return;
+      }
 
-  useEffect(() => {
-    let unsubscribe: (() => void) | undefined;
+      // Use the correct API endpoint
+      const url = mode === "user"
+        ? `http://localhost:5500/api/transactions/user/${targetAddress}`
+        : "http://localhost:5500/api/transactions/network";
 
-    const loadTransactions = async () => {
-      if (!address) return;
+      console.log(`Fetching transactions from: ${url}`);
 
-      setLoading(true);
-      try {
-        // Subscribe to transaction events
-        unsubscribe = await subscribeToTransactionEvents(async (event: TransactionEvent) => {
-          if (event.eventName === "TransactionSubmitted") {
-            const tx = event.args;
-            const receipt = await getTransactionStatus(tx.transactionHash);
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch transactions: ${response.statusText}`);
+      }
 
-            setTransactions(prev => {
-              const existingTx = prev.find(t => t.hash === tx.transactionHash);
-              if (existingTx) {
-                return prev.map(t =>
-                  t.hash === tx.transactionHash
-                    ? { ...t, status: receipt.status, gasPrice: receipt.effectiveGasPrice ? receipt.effectiveGasPrice.toString() : t.gasPrice }
-                    : t
-                );
-              }
+      const data = await response.json();
+      console.log('Raw transaction data:', data);
 
-              return [{
-                hash: tx.transactionHash,
-                from: tx.from,
-                to: tx.to,
-                value: tx.value.toString(),
-                status: receipt.status,
-                gasPrice: receipt.effectiveGasPrice ? receipt.effectiveGasPrice.toString() : '0',
-                timestamp: Date.now()
-              }, ...prev];
-            });
-          }
+      // Check if data is an object with transactions property
+      const transactionsData = Array.isArray(data) ? data : (data.transactions || []);
+
+      // Filter and sort transactions
+      const filteredData = mode === "user"
+        ? transactionsData.filter((tx: Transaction) =>
+          tx && (
+            tx.from?.toLowerCase() === targetAddress?.toLowerCase() ||
+            tx.to?.toLowerCase() === targetAddress?.toLowerCase()
+          )
+        )
+        : transactionsData;
+
+      // Sort transactions by timestamp (newest first)
+      const sortedData = filteredData
+        .filter((tx: Transaction) => tx && tx.createdAt)
+        .sort((a: Transaction, b: Transaction) => {
+          const timeA = typeof a.createdAt === 'string' ? parseInt(a.createdAt) : a.createdAt;
+          const timeB = typeof b.createdAt === 'string' ? parseInt(b.createdAt) : b.createdAt;
+          return timeB - timeA;
         });
 
-        // Load initial transactions from localStorage
-        const savedTransactions = localStorage.getItem(`transactions_${address}`);
-        if (savedTransactions) {
-          const parsedTransactions = JSON.parse(savedTransactions);
-          setTransactions(parsedTransactions);
-
-          // Update status for all transactions
-          for (const tx of parsedTransactions) {
-            const receipt = await getTransactionStatus(tx.hash);
-            setTransactions(prev =>
-              prev.map(t =>
-                t.hash === tx.hash
-                  ? { ...t, status: receipt.status, gasPrice: receipt.effectiveGasPrice ? receipt.effectiveGasPrice.toString() : t.gasPrice }
-                  : t
-              )
-            );
-          }
-        }
-      } catch (error) {
-        console.error("Failed to load transactions:", error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadTransactions();
-
-    // Save transactions to localStorage when they change
-    const saveInterval = setInterval(() => {
-      if (address) {
-        localStorage.setItem(`transactions_${address}`, JSON.stringify(transactions));
-      }
-    }, 30000); // Save every 30 seconds
-
-    return () => {
-      if (unsubscribe) unsubscribe();
-      clearInterval(saveInterval);
-    };
-  }, [address]);
-
-  const filteredTransactions = transactions.filter((tx) => {
-    if (activeTab === "all") return true;
-    return tx.status === activeTab;
-  });
-
-  const formatAddress = (addr: string) => {
-    return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
-  };
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'confirmed':
-        return 'text-green-500';
-      case 'pending':
-        return 'text-yellow-500';
-      case 'failed':
-        return 'text-red-500';
-      default:
-        return 'text-gray-500';
+      console.log(`Processed ${sortedData.length} transactions for ${mode} mode`);
+      setTransactions(sortedData);
+    } catch (error) {
+      console.error("Error fetching transactions:", error);
+      toast({
+        title: "Error",
+        description: "Failed to fetch transaction history",
+        variant: "destructive",
+      });
+      setTransactions([]);
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  const handleViewBatchDetails = async (batchId: string) => {
-    try {
-      const batchTransactions = await getBatchTransactions(batchId);
-      const merkleTree = createMerkleTreeFromTransactions(batchTransactions);
-      const merkleRoot = merkleTree.getRoot();
+  useEffect(() => {
+    if (mode === "user" && !address) {
+      setTransactions([]);
+      setIsLoading(false);
+      return;
+    }
 
-      setSelectedBatch({
-        id: batchId,
-        transactions: batchTransactions,
-        merkleRoot: merkleRoot,
-        merkleProof: merkleTree.getProof(batchTransactions[0]) // Example proof for first transaction
-      });
-      setShowBatchDetails(true);
-    } catch (error) {
-      console.error("Error fetching batch details:", error);
-      toast({
-        title: "Error",
-        description: "Failed to fetch batch details",
-        variant: "destructive",
-      });
+    fetchTransactions();
+    // Set up polling for live updates
+    const interval = setInterval(fetchTransactions, 5000);
+    return () => clearInterval(interval);
+  }, [mode, address]);
+
+  const getStatusBadge = (status: string) => {
+    switch (status.toLowerCase()) {
+      case "pending":
+        return <Badge variant="outline" className="bg-yellow-500/10 text-yellow-500 border-yellow-500/30">Pending</Badge>;
+      case "verified":
+        return <Badge variant="outline" className="bg-green-500/10 text-green-500 border-green-500/30">Verified</Badge>;
+      case "finalized":
+        return <Badge variant="outline" className="bg-blue-500/10 text-blue-500 border-blue-500/30">Finalized</Badge>;
+      case "rejected":
+        return <Badge variant="outline" className="bg-red-500/10 text-red-500 border-red-500/30">Rejected</Badge>;
+      default:
+        return <Badge variant="outline" className="bg-gray-500/10 text-gray-500 border-gray-500/30">{status}</Badge>;
     }
   };
 
   const formatTimestamp = (timestamp: number) => {
-    return new Date(timestamp * 1000).toLocaleString();
+    return formatDistanceToNow(new Date(timestamp * 1000), { addSuffix: true });
   };
 
+  const getTransactionType = (type: string) => {
+    switch (type?.toLowerCase()) {
+      case 'deposit':
+        return 'Deposit';
+      case 'withdrawal':
+        return 'Withdrawal';
+      case 'transfer':
+      default:
+        return 'Transfer';
+    }
+  };
+
+  const getStatusColor = (status: string) => {
+    switch (status.toLowerCase()) {
+      case "pending":
+        return "text-yellow-500";
+      case "verified":
+        return "text-green-500";
+      case "finalized":
+        return "text-blue-500";
+      case "rejected":
+        return "text-red-500";
+      default:
+        return "text-gray-500";
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <Card className="glass-card border border-white/10 backdrop-blur-md bg-black/30">
+        <CardContent className="py-8">
+          <div className="flex items-center justify-center">
+            <Loader2 className="h-8 w-8 animate-spin text-purple-500" />
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (transactions.length === 0) {
+    return (
+      <Card className="glass-card border border-white/10 backdrop-blur-md bg-black/30">
+        <CardContent className="py-12">
+          <div className="flex flex-col items-center justify-center text-center">
+            <div className="rounded-full bg-white/5 p-4 mb-4">
+              <ExternalLink className="h-8 w-8 text-white/30" />
+            </div>
+            <h3 className="text-lg font-medium text-white/70">No transactions found</h3>
+            <p className="text-sm text-white/50 mt-1">
+              {mode === "user"
+                ? `No transactions found for ${formatAddress(address || '')}`
+                : "No transactions found on the network"}
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
-    <Card className="w-full">
-      <CardHeader>
-        <CardTitle>Transaction History</CardTitle>
-        <CardDescription>
-          View your Layer 2 transaction history and batch details
-        </CardDescription>
+    <Card className="glass-card border border-white/10 backdrop-blur-md bg-black/30 overflow-hidden">
+      <div className="absolute inset-0 bg-gradient-to-r from-purple-500/5 to-pink-500/5 pointer-events-none"></div>
+      <CardHeader className="relative flex flex-row items-center justify-between">
+        <div>
+          <CardTitle className="text-2xl bg-gradient-to-r from-purple-400 to-pink-500 bg-clip-text text-transparent">
+            {mode === "user" ? (
+              <>Transactions for {formatAddress(address || '')}</>
+            ) : (
+              "Network Transactions"
+            )}
+          </CardTitle>
+          <CardDescription className="text-white/70">
+            {mode === "user"
+              ? `View all Layer 2 transactions for ${formatAddress(address || '')}`
+              : "View all transactions on the Layer 2 network"}
+          </CardDescription>
+        </div>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={fetchTransactions}
+          className="rounded-full bg-white/5 hover:bg-white/10"
+          disabled={isLoading}
+        >
+          <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
+        </Button>
       </CardHeader>
-      <CardContent>
-        {loading ? (
-          <p className="text-center py-4">Loading transactions...</p>
-        ) : transactions.length === 0 ? (
-          <p className="text-center py-4">No transactions found</p>
-        ) : (
+      <CardContent className="relative">
+        <div className="overflow-x-auto">
           <Table>
             <TableHeader>
-              <TableRow>
-                <TableHead>Hash</TableHead>
-                <TableHead>From</TableHead>
-                <TableHead>To</TableHead>
-                <TableHead>Value</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Gas Price</TableHead>
-                <TableHead>Timestamp</TableHead>
-                <TableHead>Actions</TableHead>
+              <TableRow className="border-white/10 hover:bg-white/5">
+                <TableHead className="text-white/70">Type</TableHead>
+                <TableHead className="text-white/70">From</TableHead>
+                <TableHead className="text-white/70">To</TableHead>
+                <TableHead className="text-white/70">Amount</TableHead>
+                <TableHead className="text-white/70">Status</TableHead>
+                <TableHead className="text-white/70">Time</TableHead>
+                <TableHead className="text-white/70">Batch</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {transactions.map((tx) => (
-                <TableRow key={tx.hash}>
-                  <TableCell className="font-mono">{tx.hash.slice(0, 8)}...</TableCell>
-                  <TableCell className="font-mono">{tx.from.slice(0, 6)}...{tx.from.slice(-4)}</TableCell>
-                  <TableCell className="font-mono">{tx.to.slice(0, 6)}...{tx.to.slice(-4)}</TableCell>
-                  <TableCell>{formatEther(tx.value)} ETH</TableCell>
-                  <TableCell>
-                    <Badge variant={tx.status === "confirmed" ? "success" : "destructive"}>
-                      {tx.status}
-                    </Badge>
+                <TableRow key={tx.hash} className="border-white/10 hover:bg-white/5">
+                  <TableCell className="text-white/80">
+                    {getTransactionType(tx.type || 'transfer')}
                   </TableCell>
-                  <TableCell>{formatEther(tx.gasPrice)} ETH</TableCell>
-                  <TableCell>{formatTimestamp(tx.timestamp)}</TableCell>
+                  <TableCell className="font-mono text-white/80">
+                    {formatAddress(tx.from)}
+                  </TableCell>
+                  <TableCell className="font-mono text-white/80">
+                    {formatAddress(tx.to)}
+                  </TableCell>
+                  <TableCell className="font-medium text-white/90">
+                    {formatEther(tx.value)} ETH
+                  </TableCell>
                   <TableCell>
-                    {tx.batchId && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleViewBatchDetails(tx.batchId!)}
-                      >
-                        View Batch
-                      </Button>
+                    {getStatusBadge(tx.status)}
+                  </TableCell>
+                  <TableCell className="text-white/70">
+                    {formatTimestamp(tx.createdAt)}
+                  </TableCell>
+                  <TableCell className="font-mono text-white/80">
+                    {tx.batchId ? (
+                      <Badge variant="outline" className="bg-purple-500/10 text-purple-400 border-purple-500/30">
+                        #{formatAddress(tx.batchId)}
+                      </Badge>
+                    ) : (
+                      <span className="text-white/30">-</span>
                     )}
                   </TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
-        )}
+        </div>
       </CardContent>
-
-      <Dialog open={showBatchDetails} onOpenChange={setShowBatchDetails}>
-        <DialogContent className="max-w-3xl">
-          <DialogHeader>
-            <DialogTitle>Batch Details</DialogTitle>
-            <DialogDescription>
-              View batch transactions and Merkle tree information
-            </DialogDescription>
-          </DialogHeader>
-          {selectedBatch && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <h3 className="font-semibold">Batch ID</h3>
-                  <p className="font-mono">{selectedBatch.id}</p>
-                </div>
-                <div>
-                  <h3 className="font-semibold">Merkle Root</h3>
-                  <p className="font-mono">{selectedBatch.merkleRoot}</p>
-                </div>
-              </div>
-
-              <div>
-                <h3 className="font-semibold mb-2">Merkle Proof (Example)</h3>
-                <div className="bg-muted p-2 rounded-md">
-                  <pre className="text-sm overflow-x-auto">
-                    {JSON.stringify(selectedBatch.merkleProof, null, 2)}
-                  </pre>
-                </div>
-              </div>
-
-              <div>
-                <h3 className="font-semibold mb-2">Transactions</h3>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>From</TableHead>
-                      <TableHead>To</TableHead>
-                      <TableHead>Value</TableHead>
-                      <TableHead>Status</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {selectedBatch.transactions.map((tx, index) => (
-                      <TableRow key={index}>
-                        <TableCell className="font-mono">{tx.from.slice(0, 6)}...{tx.from.slice(-4)}</TableCell>
-                        <TableCell className="font-mono">{tx.to.slice(0, 6)}...{tx.to.slice(-4)}</TableCell>
-                        <TableCell>{formatEther(tx.value)} ETH</TableCell>
-                        <TableCell>
-                          <Badge variant={tx.status === "confirmed" ? "success" : "destructive"}>
-                            {tx.status}
-                          </Badge>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
     </Card>
   );
 }

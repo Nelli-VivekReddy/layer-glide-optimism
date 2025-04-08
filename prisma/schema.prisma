@@ -10,60 +10,86 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model Operator {
+  id        String   @id @default(uuid())
+  address   String   @unique
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 model ContractDeployment {
   id        String   @id @default(uuid())
   address   String   @unique
   network   String
-  deployedAt DateTime @default(now())
   isActive  Boolean  @default(true)
-  balances  Layer2Balance[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model Layer2Balance {
   id              String   @id @default(uuid())
   userAddress     String
-  balance         String   @default("0")
   contractAddress String
-  contract        ContractDeployment @relation(fields: [contractAddress], references: [address])
-  updatedAt       DateTime @updatedAt
+  balance         String
   createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   @@unique([userAddress, contractAddress])
 }
 
 model Transaction {
-  id              String   @id @default(uuid())
-  hash            String   @unique
-  from            String
-  to              String
-  amount          String
-  type            String
-  layer           String
-  status          String   @default("pending")
-  contractAddress String?
-  batchId         Int?
-  merkleProof     String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-}
-
-model Balance {
-  id        String   @id @default(cuid())
-  address   String   @unique
-  layer1    String   @default("0")
-  layer2    String   @default("0")
+  id        String   @id @default(uuid())
+  from      String
+  to        String
+  amount    String
+  status    String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
 
+model Balance {
+  id          String   @id @default(cuid())
+  address     String   @unique
+  layer1Balance String
+  layer2Balance String
+  lastUpdated DateTime @default(now())
+}
+
 model Batch {
   id              String   @id @default(uuid())
-  batchId         Int      @unique
+  batchId         String   @unique
   transactionsRoot String
-  timestamp       DateTime @default(now())
   verified        Boolean  @default(false)
   finalized       Boolean  @default(false)
-  contractAddress String?
+  rejected        Boolean  @default(false)
+  creatorAddress  String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+  transactions    BatchTransaction[]
+  challenges      BatchChallenge[]
+}
+
+model BatchTransaction {
+  id        String   @id @default(uuid())
+  from      String
+  to        String
+  value     String
+  status    String   @default("pending")
+  batchId   String
+  batch     Batch    @relation(fields: [batchId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model BatchChallenge {
+  id                String   @id @default(uuid())
+  batch            Batch    @relation(fields: [batchId], references: [id])
+  batchId          String
+  challengerAddress String
+  status           String   // pending, accepted, rejected
+  resolvedBy       String?
+  resolvedAt       DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 } 

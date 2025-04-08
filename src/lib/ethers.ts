@@ -3,10 +3,7 @@ import { ethers, EventLog, Log } from 'ethers';
 
 import { toast } from "@/components/ui/use-toast";
 import { db } from './db';
-import { PrismaClient } from '@prisma/client';
 import { CONTRACT_ADDRESS } from "@/config/contract";
-
-const prisma = new PrismaClient();
 
 // Contract ABI
 const CONTRACT_ABI = [
@@ -81,7 +78,7 @@ export interface TransactionHistory {
   value: string;
   status: string;
   gasPrice: string;
-  timestamp: number;
+  createdAt: number;
 }
 
 export interface TransactionEvent {
@@ -119,40 +116,107 @@ const getProvider = async () => {
 
 // Get contract instance
 export const getContract = async () => {
-  const provider = await getProvider();
-  const signer = await provider.getSigner();
-  return new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer);
+  try {
+    const provider = await getProvider();
+
+    // First verify that we're connected to the correct network
+    const network = await provider.getNetwork();
+    console.log('Connected to network:', network.name, 'chainId:', network.chainId);
+
+    // Get the signer
+    const signer = await provider.getSigner();
+    console.log('Signer address:', await signer.getAddress());
+
+    // Verify that the contract exists at the specified address
+    const code = await provider.getCode(CONTRACT_ADDRESS);
+    if (code === '0x') {
+      console.error('No contract deployed at address:', CONTRACT_ADDRESS);
+      throw new Error(`No contract deployed at ${CONTRACT_ADDRESS}`);
+    }
+
+    // Create contract instance
+    const contract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer);
+
+    // Test if the contract is accessible and has the correct interface
+    try {
+      // Try to call a view function that should always work
+      const adminAddress = await contract.admin();
+      console.log('Contract initialized successfully, admin:', adminAddress);
+      return contract;
+    } catch (error: any) {
+      console.error('Contract interface error:', error);
+      if (error.message.includes('call revert exception')) {
+        throw new Error('Contract call reverted. Please check if you are connected to the correct network.');
+      } else if (error.message.includes('BAD_DATA')) {
+        throw new Error('Contract interface mismatch. The ABI might not match the deployed contract.');
+      }
+      throw error;
+    }
+  } catch (error: any) {
+    console.error('Error initializing contract:', error);
+    if (error.message.includes('MetaMask is not installed')) {
+      throw new Error('Please install MetaMask to interact with the blockchain.');
+    } else if (error.message.includes('user rejected')) {
+      throw new Error('Please connect your wallet to continue.');
+    } else if (error.message.includes('network')) {
+      throw new Error('Please connect to the correct network (Hardhat or Sepolia).');
+    }
+    throw new Error('Failed to initialize contract. Please check your wallet connection and network.');
+  }
 };
 
 // Get transaction history for an address
 export const getTransactionHistory = async (address: string): Promise<TransactionHistory[]> => {
   try {
-    const contract = await getContract();
-    const provider = await getProvider();
+    // First try to get from the blockchain
+    try {
+      const contract = await getContract();
+      const provider = await getProvider();
 
-    // Get all TransactionExecuted events for this address
-    const filter = contract.filters.TransactionExecuted(address);
-    const events = await contract.queryFilter(filter);
+      // Get all TransactionExecuted events for this address
+      const filter = contract.filters.TransactionExecuted(address);
+      const events = await contract.queryFilter(filter);
 
-    // Convert events to TransactionHistory format
-    const transactions = await Promise.all(events.map(async (event) => {
-      const block = await provider.getBlock(event.blockNumber);
-      // Cast event to EventLog to access args
-      const eventLog = event as ethers.EventLog;
-      return {
-        hash: event.transactionHash,
-        from: eventLog.args[0], // sender
-        to: eventLog.args[1],   // recipient
-        value: eventLog.args[2].toString(), // amount
-        status: "confirmed", // Since we're getting past events, they're confirmed
-        gasPrice: eventLog.args[3]?.toString() || "0", // gas price if available
-        timestamp: block?.timestamp || Math.floor(Date.now() / 1000)
-      };
-    }));
+      // Convert events to TransactionHistory format
+      const transactions = await Promise.all(events.map(async (event) => {
+        const block = await provider.getBlock(event.blockNumber);
+        // Cast event to EventLog to access args
+        const eventLog = event as ethers.EventLog;
+        return {
+          hash: event.transactionHash,
+          from: eventLog.args[0], // sender
+          to: eventLog.args[1],   // recipient
+          value: eventLog.args[2].toString(), // amount
+          status: "confirmed", // Since we're getting past events, they're confirmed
+          gasPrice: eventLog.args[3]?.toString() || "0", // gas price if available
+          createdAt: block?.timestamp || Math.floor(Date.now() / 1000) // Use createdAt instead of timestamp
+        };
+      }));
 
-    return transactions;
+      return transactions;
+    } catch (error) {
+      console.error("Error getting transaction history from blockchain:", error);
+
+      // If blockchain fails, try to get from the API
+      try {
+        const response = await fetch(`http://localhost:5500/api/transactions?address=${address}`);
+        if (!response.ok) {
+          throw new Error(`API error: ${response.status}`);
+        }
+
+        const data = await response.json();
+        // Ensure all transactions have createdAt field
+        return data.map((tx: any) => ({
+          ...tx,
+          createdAt: tx.createdAt || tx.timestamp || Math.floor(Date.now() / 1000)
+        }));
+      } catch (apiError) {
+        console.error("Error getting transaction history from API:", apiError);
+        return [];
+      }
+    }
   } catch (error) {
-    console.error("Error getting transaction history:", error);
+    console.error("Error fetching transaction history:", error);
     return [];
   }
 };
@@ -306,7 +370,9 @@ export const batchTransfer = executeL2BatchTransaction;
 export const submitBatchWithMerkleRoot = async (merkleRoot: string) => {
   try {
     const contract = await getContract();
-    // Convert the merkleRoot to an array since the contract expects bytes32[]
+    // Get the current batch ID
+    const nextBatchId = await contract.nextBatchId();
+    // Submit the batch with the current batch ID
     const tx = await contract.submitBatch([merkleRoot]);
     await tx.wait();
     toast({
@@ -326,11 +392,22 @@ export const submitBatchWithMerkleRoot = async (merkleRoot: string) => {
 };
 
 // Verify a batch
-export const verifyBatch = async (batchId: number) => {
+export const verifyBatch = async (batchId: bigint | number | string) => {
   try {
     const contract = await getContract();
-    const tx = await contract.verifyBatch(batchId);
+    if (!contract) {
+      throw new Error("Failed to get contract instance");
+    }
+
+    // Convert batchId to BigInt if it's not already
+    const numericBatchId = BigInt(batchId);
+
+    console.log(`Verifying batch with ID: ${numericBatchId}`);
+
+    // Verify the batch on-chain
+    const tx = await contract.verifyBatch(numericBatchId);
     await tx.wait();
+
     toast({
       title: "Success",
       description: "Batch verified successfully",
@@ -340,7 +417,7 @@ export const verifyBatch = async (batchId: number) => {
     console.error("Error verifying batch:", error);
     toast({
       title: "Error",
-      description: "Failed to verify batch",
+      description: "Failed to verify batch: " + (error instanceof Error ? error.message : String(error)),
       variant: "destructive",
     });
     throw error;
@@ -370,10 +447,26 @@ export const finalizeBatch = async (batchId: number) => {
 };
 
 // Report fraud with Merkle proof
-export const reportFraudWithMerkleProof = async (batchId: number, proof: string[]) => {
+export const reportFraudWithMerkleProof = async (
+  batchId: number,
+  fraudProof: string,
+  tx: { sender: string, recipient: string, amount: string },
+  merkleProof: string[]
+) => {
   try {
     const contract = await getContract();
-    const tx = await contract.reportFraud(batchId, proof);
+
+    // Convert amount to wei
+    const amountInWei = parseEther(tx.amount);
+
+    // Create the transaction object
+    const txObj = {
+      sender: tx.sender,
+      recipient: tx.recipient,
+      amount: amountInWei
+    };
+
+    const tx = await contract.reportFraud(batchId, fraudProof, txObj, merkleProof);
     await tx.wait();
     toast({
       title: "Success",
@@ -391,44 +484,112 @@ export const reportFraudWithMerkleProof = async (batchId: number, proof: string[
   }
 };
 
-// Get Layer 2 balance
-export const getLayer2Balance = async (address: string) => {
+// Get Layer 1 balance
+export const getLayer1Balance = async (address: string): Promise<string> => {
   try {
-    const contract = await getContract();
-    const balance = await contract.balances(address);
-    return formatEther(balance);
+    // First try to get balance from the blockchain
+    try {
+      const provider = await getProvider();
+      const balance = await provider.getBalance(address);
+      return formatEther(balance);
+    } catch (error) {
+      console.error("Error getting Layer 1 balance from blockchain:", error);
+
+      // If blockchain fails, try to get from the API
+      try {
+        const response = await fetch(`http://localhost:5500/api/balance/${address}`);
+        if (!response.ok) {
+          throw new Error(`API error: ${response.status}`);
+        }
+
+        const data = await response.json();
+        return data.layer1Balance || "0";
+      } catch (apiError) {
+        console.error("Error getting Layer 1 balance from API:", apiError);
+        return "0";
+      }
+    }
   } catch (error) {
-    console.error("Error getting Layer 2 balance:", error);
-    throw error;
+    console.error("Error fetching Layer 1 balance:", error);
+    return "0";
   }
 };
+
+// Get Layer 2 balance
+export const getLayer2Balance = async (address: string): Promise<string> => {
+  try {
+    // Try to get from the API first
+    try {
+      const response = await fetch(`http://localhost:5500/api/balance/${address}`);
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status}`);
+      }
+      const data = await response.json();
+      return data.layer2Balance || "0";
+    } catch (apiError) {
+      console.error("Error getting Layer 2 balance from API:", apiError);
+
+      // If API fails, try to get from the blockchain
+      try {
+        const contract = await getContract();
+        const balance = await contract.balances(address);
+        return formatEther(balance);
+      } catch (blockchainError) {
+        console.error("Error getting Layer 2 balance from blockchain:", blockchainError);
+        return "0"; // Return 0 as a fallback
+      }
+    }
+  } catch (error) {
+    console.error("Error in getLayer2Balance:", error);
+    return "0"; // Return 0 as a fallback
+  }
+};
+
+// Format large numbers without scientific notation
+export function formatLargeNumber(value: string): string {
+  try {
+    const num = Number(value);
+    if (isNaN(num)) return "0.000000";
+
+    return new Intl.NumberFormat('en-US', {
+      minimumFractionDigits: 6,
+      maximumFractionDigits: 6,
+      useGrouping: true,
+      notation: 'standard'
+    }).format(num);
+  } catch (error) {
+    console.error("Error formatting number:", error);
+    return "0.000000";
+  }
+}
 
 // Get all batches (admin only)
 export const getBatches = async (): Promise<Batch[]> => {
   try {
     const contract = await getContract();
-    const nextBatchId = await contract.nextBatchId();
-    const batches: Batch[] = [];
+    const nextBatchIdBN = await contract.nextBatchId();
+    const nextBatchId = Number(nextBatchIdBN);
 
-    // Fetch all batches from 0 to nextBatchId-1
-    // Convert nextBatchId to number if it's a BigNumber, otherwise use it directly
-    const batchCount = typeof nextBatchId === 'bigint' ? Number(nextBatchId) : nextBatchId;
-
-    for (let i = 0; i < batchCount; i++) {
-      const batch = await contract.batches(i);
-      batches.push({
-        id: i.toString(),
-        transactionsRoot: batch.transactionsRoot,
-        timestamp: batch.timestamp.toString(),
-        verified: batch.verified,
-        finalized: batch.finalized
-      });
+    const batchPromises = [];
+    for (let i = Math.max(0, nextBatchId - 10); i < nextBatchId; i++) {
+      batchPromises.push(
+        contract.batches(i)
+          .then(batch => ({
+            id: batch.batchId.toString(),
+            transactionsRoot: batch.transactionsRoot,
+            timestamp: batch.timestamp.toString(),
+            verified: batch.verified,
+            finalized: batch.finalized
+          }))
+          .catch(() => null)
+      );
     }
 
-    return batches;
+    const batches = await Promise.all(batchPromises);
+    return batches.filter(batch => batch !== null);
   } catch (error) {
     console.error("Error fetching batches:", error);
-    throw error;
+    return [];
   }
 };
 
@@ -644,22 +805,23 @@ export const switchNetwork = async (networkName: "sepolia" | "localhost") => {
 // Track contract deployment
 const trackContractDeployment = async (address: string, network: string) => {
   try {
-    // Deactivate previous deployments for this network
-    await prisma.contractDeployment.updateMany({
-      where: { network, isActive: true },
-      data: { isActive: false }
+    // Use fetch API to update contract deployment
+    const response = await fetch('http://localhost:5500/api/contract/deployment', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ address, network }),
     });
 
-    // Create new deployment record
-    await prisma.contractDeployment.create({
-      data: {
-        address,
-        network,
-        isActive: true
-      }
-    });
+    if (!response.ok) {
+      throw new Error(`Failed to track contract deployment: ${response.statusText}`);
+    }
+
+    return await response.json();
   } catch (error) {
     console.error('Error tracking contract deployment:', error);
+    throw error;
   }
 };
 
@@ -692,27 +854,33 @@ const updateLayer2Balance = async (userAddress: string, contractAddress: string,
   }
 };
 
-// Get Layer 1 balance for a user
-export const getLayer1Balance = async (address: string): Promise<string> => {
-  try {
-    const provider = await getProvider();
-    const balance = await provider.getBalance(address);
-    return formatEther(balance);
-  } catch (error) {
-    console.error('Error getting Layer 1 balance:', error);
-    return '0';
-  }
-};
-
 // Check if an address is an admin
 export const isAdmin = async (address: string): Promise<boolean> => {
   try {
     const contract = await getContract();
-    const adminAddress = await contract.admin();
-    const isOperator = await contract.isOperator(address);
-    return address.toLowerCase() === adminAddress.toLowerCase() || isOperator;
+
+    // Only check admin() function
+    try {
+      const adminAddress = await contract.admin();
+      return adminAddress.toLowerCase() === address.toLowerCase();
+    } catch (error) {
+      console.warn("admin() check failed:", error);
+
+      // For development, allow hardcoded admin address
+      if (process.env.NODE_ENV === 'development') {
+        const hardcodedAdmin = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266";
+        return address.toLowerCase() === hardcodedAdmin.toLowerCase();
+      }
+      return false;
+    }
   } catch (error) {
     console.error("Error checking admin status:", error);
+
+    // For development, allow hardcoded admin address
+    if (process.env.NODE_ENV === 'development') {
+      const hardcodedAdmin = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266";
+      return address.toLowerCase() === hardcodedAdmin.toLowerCase();
+    }
     return false;
   }
 };

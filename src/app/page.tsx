@@ -3,7 +3,7 @@
 import { useWallet } from "@/hooks/useWallet";
 import DepositCard from "@/components/DepositCard";
 import BatchSubmission from "@/components/BatchSubmission";
-import TransactionTracker from "@/components/TransactionTracker";
+import { TransactionTracker } from "@/components/TransactionTracker";
 import AdminPanel from "@/components/AdminPanel";
 import TransactionFlow from "@/components/TransactionFlow";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -46,17 +46,11 @@ export default function Home() {
                 {/* Right Column */}
                 <div className="space-y-8">
                     <AdminPanel />
-                    <Card>
-                        <CardHeader>
-                            <CardTitle>Transaction History</CardTitle>
-                            <CardDescription>View your recent transactions</CardDescription>
-                        </CardHeader>
-                        <CardContent>
-                            <TransactionTracker />
-                        </CardContent>
-                    </Card>
                 </div>
             </div>
+
+            {/* Transaction History at the bottom */}
+            <TransactionTracker mode="user" />
         </div>
     );
 } 

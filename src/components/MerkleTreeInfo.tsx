@@ -93,19 +93,20 @@ const MerkleTreeInfo = () => {
             // 4. Submit the fraud report with the proof
 
             // For demonstration purposes, we'll create a dummy transaction and proof
-            const dummyTransaction: Transaction = {
+            const dummyTransaction = {
                 sender: address,
                 recipient: "0x0000000000000000000000000000000000000000",
                 amount: "0.1"
             };
 
-            const dummyProof = ["0x0000000000000000000000000000000000000000000000000000000000000000"];
+            const dummyFraudProof = "0x0000000000000000000000000000000000000000000000000000000000000000";
+            const dummyMerkleProof = ["0x0000000000000000000000000000000000000000000000000000000000000000"];
 
             await reportFraudWithMerkleProof(
                 selectedBatch.id,
-                "0x0000000000000000000000000000000000000000000000000000000000000000",
+                dummyFraudProof,
                 dummyTransaction,
-                dummyProof
+                dummyMerkleProof
             );
 
             toast({
